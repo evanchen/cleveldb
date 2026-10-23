@@ -2,6 +2,7 @@
  * T003 示例模块测试：创建/销毁、错误参数、所有权借用、溢出与诊断文本。
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "harness.h"

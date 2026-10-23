@@ -36,6 +36,7 @@
 - 每个头文件必须自包含：单独 `#include` 即可编译，不依赖前置包含。
 - 保护宏统一为 `CLDB_<路径>_H_`，例如 `src/util/example.h` 用 `CLDB_SRC_UTIL_EXAMPLE_H_`。
 - include 顺序：本文件对应头 → C 标准库 → 项目公开头 → 项目内部头，组间空一行。
+- 不依赖其他头文件间接提供符号：用 `NULL`/`size_t` 就显式包含 `<stddef.h>`，用 `bool` 就包含 `<stdbool.h>`。
 - 不 `#include` `.c` 文件；不在头文件定义对象或分配内存。
 - 只有 `include/cleveldb/` 是对外 API；`src/` 内部头不安装，测试通过私有 include 路径访问。
 - 头文件里只放声明、类型、宏和极小的 `static inline` 纯函数（如 Slice 取值）。任何包含分配、I/O、锁的函数都放 `.c`。
