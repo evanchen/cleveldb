@@ -107,16 +107,18 @@ P8 兼容/加固/验收（T801-T806）
 
 ## T003 C 编码规范与所有权规则
 
-- **依赖**：T001
+- **依赖**：T001, T002
 - **上游**：上游头文件的注释风格、`port/thread_annotations.h` 的锁标注理念
 - **目标**：把 plan.md §6 的设计约束落成可执行的检查和文档。
 - **设计/交付**：
   - `doc/coding-style.md`：命名、头文件保护、类型、整数溢出、错误传播、`goto cleanup`、锁注释、日志、禁用项（VLA、隐式转换、未对齐访问）。
   - `doc/ownership.md`：每个基础类型的 owned/borrowed 规则；create/destroy 约定；公开 API 的 `cldb_free` 规则。
-  - 一个示例模块（例如 `src/util/example.c`）展示：init/destroy、status 返回、goto cleanup、锁注释、测试。
+  - `.clang-format`：Google 基风格、2 空格、80 列、指针右对齐。
+  - 示例模块 `src/util/example.{h,c}`：create/destroy、错误返回、`goto cleanup`、锁注释、测试。status 尚未实现，先用本地 result 枚举，T102 再迁移。
 - **验收**：
   - 示例模块通过 T002 测试；代码审查清单可逐条勾选。
   - 文档明确回答：分配失败如何处理、Slice 生命周期、回调参数借用规则。
+  - 示例覆盖参数错误与整数溢出；文档写清借用窗口和部分构造清理规则。
 - **吃透检查点**：
   - 为什么一个函数只保留一个出口？哪些短函数可以例外？
   - 为什么错误消息不落盘、也不参与比较？
@@ -180,6 +182,7 @@ P8 兼容/加固/验收（T801-T806）
   - `cldb_status_t {code; char message[256];}`；构造器 `ok/not_found/corruption/not_supported/invalid_argument/io`，带 `context` 与可选 `detail`，格式 `context: detail`。
   - `cldb_status_to_string`（写入调用者 buffer）、`code/message/is_*`。
   - 测试辅助 `tests/status_test_util.h`：`CLDB_EXPECT_OK/ASSERT_OK`、`CLDB_EXPECT_STATUS/ASSERT_STATUS`；只求值一次，失败时打印 code 与 message。
+  - 把 T003 示例模块的本地 result 枚举迁移为 `cldb_status_t`，同步更新测试与文档。
   - 阅读上游状态内部格式：4 字节长度 + 1 字节 code + 消息；解释为什么上游不做析构/释放。
 - **验收**：
   - 每个错误码的构造/转换/拷贝测试；长消息截断后仍以 NUL 结尾。

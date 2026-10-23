@@ -6,8 +6,10 @@
 #include "harness.h"
 
 void cldb_register_harness_tests(void);
+void cldb_register_example_tests(void);
 
 int main(int argc, char **argv) {
   cldb_register_harness_tests();
+  cldb_register_example_tests();
   return cldb_test_run(argc, argv);
 }

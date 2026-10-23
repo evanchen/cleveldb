@@ -1,0 +1,7 @@
+# 对齐上游 Google 风格；2 空格、80 列、指针右对齐。
+BasedOnStyle: Google
+IndentWidth: 2
+ColumnLimit: 80
+DerivePointerAlignment: false
+PointerAlignment: Right
+SortIncludes: false

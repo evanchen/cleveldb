@@ -1064,7 +1064,7 @@ E:\github\cleveldb\
   - Debug：`-O0 -g3 -DCLDB_DEBUG=1`；Release：`-O2 -DNDEBUG`；
   - Sanitizer：`-fsanitize=address,undefined`（Linux GCC/Clang）。
 - 测试：CTest 注册多个测试可执行文件或单一 runner；每个测试可在 MemEnv 上运行，不污染源码目录。
-- 代码格式：clang-format（LLVM 基风格，4 空格缩进，80/100 列二选一并固定）。
+- 代码格式：clang-format（Google 基风格，2 空格缩进，80 列，指针右对齐）。
 - 静态检查：clang-tidy（可选）；`-Werror` 仅在 CI 的专用 job 开启，避免本地工具链差异阻塞学习。
 - CI 矩阵（仅 Linux）：GCC + Clang；可选 ASan/TSAN job。
 
@@ -1072,7 +1072,7 @@ E:\github\cleveldb\
 
 - 类型：`intN_t/uintN_t`、`size_t`；文件大小/偏移用 `uint64_t`；序列号用 `uint64_t`（只用低 56 位）。
 - 命名：公开 `cldb_*`；内部也统一 `cldb_*`，静态函数 `static`；结构体 `_t` 后缀；枚举 `CLDB_*`。
-- 头文件保护：`CLEVELDB_<PATH>_H_`。
+- 头文件保护：`CLDB_<PATH>_H_`（例如 `CLDB_SRC_UTIL_EXAMPLE_H_`）。
 - 不写变长数组；不在栈上放 4 MB 缓冲；大块用堆/ Arena。
 - 所有 `malloc/realloc/calloc` 结果检查；`free(NULL)` 允许。
 - 所有整数运算在用于分配/偏移前检查溢出；`size_t` 与 `uint64_t` 转换显式。
