@@ -90,14 +90,15 @@ P8 兼容/加固/验收（T801-T806）
   - `tests/harness.h/.c`：
     - 显式注册表：每个测试文件提供 `void cldb_register_xxx_tests(void)`，在 `tests/main.c` 中调用；避免依赖平台 constructor。
     - `CLDB_TEST(name)` 定义测试函数；`CLDB_RUN_TEST` 注册。
-    - 断言：`CLDB_ASSERT_TRUE/FALSE`、`CLDB_ASSERT_EQ_INT/UINT/PTR/STR`、`CLDB_ASSERT_OK`、`CLDB_ASSERT_STATUS`；失败记录文件/行号并继续（EXPECT）或终止当前测试（ASSERT）。
+    - 断言：`CLDB_ASSERT_TRUE/FALSE`、`CLDB_ASSERT_EQ_INT/UINT/PTR/STR`；失败记录文件/行号并继续（EXPECT）或终止当前测试（ASSERT）。OK/STATUS 断言依赖状态类型，延后到 T102。
     - 命令行：`--filter=substr`、`--list`、`--repeat=N`；返回非零表示失败。
-    - 临时目录辅助：基于 `cldb_env` 的 `GetTestDirectory` + 唯一子目录；测试结束清理。
+    - 临时目录辅助延后到 T114（依赖 `cldb_env` 的 `GetTestDirectory`）。
   - CMake 注册 `cleveldb_tests` 到 CTest。
 - **验收**：
   - 至少 3 个通过/失败/过滤示例；故意失败时退出码非零且输出定位。
   - 在 Linux 上输出格式稳定、可解析（GCC/Clang 构建一致）。
   - 断言宏不吞掉副作用（例如只求值一次）。
+  - ASSERT 通过 longjmp 终止当前测试，后续测试与汇总仍正常执行。
 - **吃透检查点**：
   - 如何测试 `static` 函数？为什么不需要把内部符号导出？
   - 为什么注册表比平台 constructor 更可移植？
@@ -178,11 +179,13 @@ P8 兼容/加固/验收（T801-T806）
   - 枚举值严格对应：OK=0, NotFound=1, Corruption=2, NotSupported=3, InvalidArgument=4, IOError=5。
   - `cldb_status_t {code; char message[256];}`；构造器 `ok/not_found/corruption/not_supported/invalid_argument/io`，带 `context` 与可选 `detail`，格式 `context: detail`。
   - `cldb_status_to_string`（写入调用者 buffer）、`code/message/is_*`。
+  - 测试辅助 `tests/status_test_util.h`：`CLDB_EXPECT_OK/ASSERT_OK`、`CLDB_EXPECT_STATUS/ASSERT_STATUS`；只求值一次，失败时打印 code 与 message。
   - 阅读上游状态内部格式：4 字节长度 + 1 字节 code + 消息；解释为什么上游不做析构/释放。
 - **验收**：
   - 每个错误码的构造/转换/拷贝测试；长消息截断后仍以 NUL 结尾。
   - 与上游 `Status::ToString()` 的前缀语义对照（`NotFound: `、`Corruption: `、`IO error: ` 等）。
   - 结构体 copy 后独立可用（不共享堆指针）。
+  - 状态断言宏能区分 OK 与非 OK，且不重复求值。
 - **吃透检查点**：
   - 上游 `Status` 为什么可以按值拷贝而无需引用计数？它是否泄漏内存？为什么可以接受？
   - 为什么错误码是稳定契约，而错误文本不是？
@@ -432,6 +435,7 @@ P8 兼容/加固/验收（T801-T806）
   - 后台队列：`Schedule` 用 mutex + condvar + FIFO 队列；首次调用按需创建后台线程并 detach；回调严格串行执行。`StartThread` 用 `pthread_create` + detach。
   - 时间：`NowMicros` 与上游一致使用 `gettimeofday`（不保证单调）；`SleepForMicroseconds` 用 `nanosleep` 并处理 EINTR。
   - `GetTestDirectory`：`TEST_TMPDIR` 或 `/tmp/leveldbtest-<euid>`；`cldb_env_default()` 进程级单例（不随进程退出销毁）。
+  - 测试辅助 `tests/temp_dir.h/.c`：在 `GetTestDirectory` 下创建唯一子目录，测试结束递归清理。
   - 错误映射：ENOENT → NotFound，其余 errno → IOError（与 `env_posix.cc` 一致）；不引入 macOS/Windows 条件编译。
 - **验收**：
   - 在 Linux 上移植并跑通完整 `env_test`：读写/追加/随机读/跳过/重命名/子目录/文件大小/锁冲突/测试目录。
@@ -439,6 +443,7 @@ P8 兼容/加固/验收（T801-T806）
   - 同一进程重复 LockFile 失败；第二个进程抢锁失败；Unlock 后可重新加锁。
   - 调度 1000 个任务：并发度为 1、顺序为 FIFO、空闲后仍能唤醒。
   - 时间测量误差可接受；默认 Env 重复获取返回同一指针。
+  - 测试临时目录互不冲突，清理后不残留。
   - CMake 只编译 `env_posix.c`/`port_posix.c`；非 Linux 平台在配置或编译期明确报错。
 - **吃透检查点**：
   - `pread` 为什么天然适合 RandomAccessFile 的线程安全？

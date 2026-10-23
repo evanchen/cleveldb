@@ -89,8 +89,28 @@ if(CLDB_BUILD_TESTS)
   target_link_libraries(cleveldb_tests PRIVATE cleveldb::cleveldb)
   cldb_configure_target(cleveldb_tests)
 
-  # T001 占位测试；T002 替换为正式入口。
-  add_test(NAME cleveldb_skeleton COMMAND cleveldb_tests)
+  # 全量、过滤、列表、重复、故意失败五条回归。
+  add_test(NAME cleveldb_suite COMMAND cleveldb_tests)
+
+  add_test(NAME cleveldb_filter COMMAND cleveldb_tests
+    --filter=harness_filter_target)
+  set_tests_properties(cleveldb_filter PROPERTIES
+    PASS_REGULAR_EXPRESSION "1 test ran")
+
+  add_test(NAME cleveldb_list COMMAND cleveldb_tests --list)
+  set_tests_properties(cleveldb_list PROPERTIES
+    PASS_REGULAR_EXPRESSION "harness_filter_target")
+
+  add_test(NAME cleveldb_repeat COMMAND cleveldb_tests
+    --filter=harness_filter_target --repeat=3)
+  set_tests_properties(cleveldb_repeat PROPERTIES
+    PASS_REGULAR_EXPRESSION "3 tests ran")
+
+  add_test(NAME cleveldb_failure_path COMMAND cleveldb_tests
+    --filter=harness_failure_example)
+  set_tests_properties(cleveldb_failure_path PROPERTIES
+    ENVIRONMENT "CLDB_TEST_ENABLE_FAILURE=1"
+    WILL_FAIL TRUE)
 endif()
 
 if(CLDB_BUILD_TOOLS)
