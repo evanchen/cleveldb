@@ -148,7 +148,7 @@ cleanup:
 - 内部对象（MemTable、Version、Table）采用**refcount**：多个读者可同时持引用；最后一个 unref 释放。
 - refcount 不是公开契约：用户拿不到 ref/unref，也不依赖计数；公开 API 只暴露借用句柄或显式 destroy。
 - 快照是两者之间的桥梁：用户拿到借用句柄，DB 内部通过 Version 引用保证数据存活，`release_snapshot` 负责减引用。
-- 内部 ref/unref 的锁/原子语义必须在模块头注释写清；跨线程 unref 需要原子或全局锁，按任务设计选择。
+- 内部 ref/unref 的锁/原子语义写在相关函数声明或字段注释中；跨线程 unref 需要原子或全局锁，按任务设计选择。
 
 ## 7. 典型生命周期
 

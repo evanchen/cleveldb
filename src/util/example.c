@@ -1,9 +1,3 @@
-/*
- * 上游：无（T003 规范示例）。
- * 职责：演示 create/destroy、错误传播、goto cleanup、所有权与锁注释。
- * 锁：mutex 保护 name/value；name() 返回借用指针。
- */
-
 #include "util/example.h"
 
 #include <pthread.h>

@@ -1,9 +1,3 @@
-/*
- * 上游：util/testharness.h/.cc（仅借鉴注册与断言思路）。
- * 职责：测试注册、过滤、重复、断言与结果输出。
- * 锁：无；断言仅限测试主线程。
- */
-
 #include "harness.h"
 
 #include <errno.h>

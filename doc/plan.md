@@ -738,12 +738,17 @@ typedef struct cldb_slice {
 } cldb_slice_t;
 
 static inline cldb_slice_t cldb_slice_make(const char *data, size_t size);
+static inline cldb_slice_t cldb_slice_empty(void);
+static inline const char *cldb_slice_data(cldb_slice_t s);
+static inline size_t cldb_slice_size(cldb_slice_t s);
+static inline bool cldb_slice_is_empty(cldb_slice_t s);
 static inline int cldb_slice_compare(cldb_slice_t a, cldb_slice_t b);
 static inline bool cldb_slice_equal(cldb_slice_t a, cldb_slice_t b);
+static inline bool cldb_slice_starts_with(cldb_slice_t s, cldb_slice_t prefix);
 static inline void cldb_slice_remove_prefix(cldb_slice_t *s, size_t n);
 ```
 
-Slice 不拥有内存；调用者必须保证在回调/调用期间底层数据有效。Cache deleter、Comparator、FilterPolicy 的 key 参数都是借用 Slice。
+Slice 不拥有内存；调用者必须保证在回调/调用期间底层数据有效。Cache deleter、Comparator、FilterPolicy 的 key 参数都是借用 Slice。`cldb_slice_make(NULL, n)` 返回空切片；`remove_prefix` 删除超过长度的字节时置空。
 
 **Status**（公开，按值返回）：
 
@@ -781,7 +786,7 @@ typedef struct cldb_buf {
 - `init/free/clear/reserve/resize/append/append_char/append_slice/assign/swap`；
 - 所有增长检查 `SIZE_MAX` 溢出；失败返回 false，调用者转成 status；
 - `cldb_buf_slice()` 返回借用 Slice；`cldb_buf_cstr()` 返回 NUL 字符串（路径用）；
-- 支持自追加：先保存源 Slice，确认 realloc 后源指针可能失效则先拷贝或使用临时 buffer。
+- 支持自追加：写入前记录源在分配区内的偏移，`realloc` 后用新基址重算源指针，避免悬垂。
 
 ### 6.3 C++ 类/虚拟接口 → struct + vtable
 
@@ -1015,8 +1020,7 @@ E:\github\cleveldb\
 │  ├─ plan.md
 │  ├─ tasks.md
 │  ├─ coding-style.md
-│  ├─ ownership.md
-│  └─ upstream-baseline.md
+│  └─ ownership.md
 ├─ include/cleveldb/
 │  ├─ cldb.h              DB API / options / range
 │  ├─ slice.h
@@ -1078,7 +1082,7 @@ E:\github\cleveldb\
 - 所有整数运算在用于分配/偏移前检查溢出；`size_t` 与 `uint64_t` 转换显式。
 - 禁止未定义行为：不要依赖有符号溢出、未对齐访问、严格别名；编码/解码逐字节。
 - 日志中不打印原始二进制；用 `cldb_escape_string`。
-- 每个 `.c` 顶部注释：对应上游文件、职责、锁要求、所有权。
+- 注释挂在函数声明、数据结构声明和字段旁；不写文件级任务说明或任务编号。
 
 ---
 
@@ -1086,7 +1090,7 @@ E:\github\cleveldb\
 
 | 阶段 | 名称 | 核心产出 | 退出条件（Gate） |
 |---|---|---|---|
-| P0 | 脚手架 | CMake、测试框架、规范、上游基线记录 | 空项目可在 Linux 构建；测试 runner 可跑 |
+| P0 | 脚手架 | CMake、测试框架、规范、上游参考约定 | 空项目可在 Linux 构建；测试 runner 可跑 |
 | P1 | 基础库 | Slice/Status/Buffer、编码、哈希/随机、Arena、CRC32C、port、Comparator、Iterator、Bloom、LRU Cache、Env/MemEnv、文件名/日志/选项 | 所有 util 单测通过；MemEnv 可用于后续测试；格式基元有 golden 向量 |
 | P2 | WAL | log format、Writer、Reader | 分片/边界/校验/重同步测试通过；与上游 WAL 字节兼容 |
 | P3 | 内存引擎 | dbformat、WriteBatch、SkipList、MemTable、SnapshotList | 内存读写、序列、快照、并发插入测试通过 |

@@ -72,6 +72,6 @@ void cldb_test_check_str(const char *file, int line, const char *expr,
 #define CLDB_ASSERT_EQ_STR(expected, actual) \
   CLDB_CHECK_EQ_STR_(expected, actual, true)
 
-/* OK/STATUS 断言依赖 cldb_status_t，见 T102 的 tests/status_test_util.h。 */
+/* OK/STATUS 断言依赖 cldb_status_t，见 tests/status_test_util.h。 */
 
 #endif /* CLDB_TESTS_HARNESS_H_ */

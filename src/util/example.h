@@ -3,10 +3,7 @@
 
 #include <stdint.h>
 
-/*
- * T003 规范示例：演示不透明句柄、所有权、错误传播与锁注释。
- * T102 实现 cldb_status_t 后，把本地 result 枚举迁移为统一状态。
- */
+/* 临时结果码；统一状态类型就绪后替换。 */
 typedef enum cldb_example_result {
   CLDB_EXAMPLE_OK = 0,
   CLDB_EXAMPLE_INVALID_ARGUMENT = 1,

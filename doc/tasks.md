@@ -125,26 +125,21 @@ P8 兼容/加固/验收（T801-T806）
   - 内部引用计数与公开对象所有权如何区分？
 - **实验**：按规范写一个故意在错误路径漏 free 的函数，用 ASan 找出并修复。
 
-## T004 上游基线快照与构建脚本
+## T004 上游参考约定
 
 - **依赖**：T001
-- **上游**：`CMakeLists.txt`、`README.md`、`doc/*.md`、`util/env_*_test_helper.h`
-- **目标**：固定“参考实现”的版本和可重复构建方式，为后续差分/兼容测试做准备。
-- **设计/交付**：
-  - `doc/upstream-baseline.md`：记录 `git describe`、commit、构建命令、测试目标、已知编译选项（Snappy/Zstd 开关）。
-  - `tools/build_upstream.sh`：在 `E:\github\leveldb` 之外创建构建目录，配置 `LEVELDB_BUILD_TESTS=ON`、`LEVELDB_BUILD_BENCHMARKS=ON`；不修改上游源码。
-  - 上游的 `third_party/googletest`、`third_party/benchmark` 是 git submodule；先执行 `git -C <upstream> submodule update --init --recursive`。它们只存在于上游构建目录，不复制进本仓库；只构建上游库时可关闭 tests/benchmarks 以避免这些依赖。
-  - 上游可选压缩库（Snappy/Zstd）默认由 CMake 自动探测；差分测试若只需无压缩格式，不必安装。
-  - 编写 `tests/compat/README.md`：说明 C++ 辅助程序如何设置 `options.compression = kNoCompression`，以及后续如何链接上游库。
-  - 不把上游源码复制进本仓库。
-- **验收**：
-  - 在 Linux 上成功构建上游 `leveldb` 库/测试。
-  - 记录实际 `git describe` 输出；后续变更基线必须更新文档。
+- **上游**：`E:\github\leveldb`（只读参考）
+- **目标**：约定如何对照上游源码，避免把上游构建流程引入本仓库。
+- **约定**：
+  - 上游源码固定在 `E:\github\leveldb`，commit `bb74ef7`；实现前直接阅读对应文件。
+  - 不复制上游源码或头文件，不在本仓库添加上游构建脚本，不初始化/构建上游子模块。
+  - 需要运行上游行为或产物时，由用户在自己的 Debian 环境独立编译。
+  - 差分/兼容测试若需要上游产物，只通过参数传路径，不写入本仓库。
+- **验收**：本仓库不含上游源码、构建脚本或构建产物；后续任务引用上游文件时以固定 commit 为准。
 - **吃透检查点**：
-  - 为什么必须固定 commit，而不是依赖“最新 master”？
-  - 上游测试哪些依赖真实文件系统？哪些可以用 MemEnv？
-  - 为什么互操作测试必须关闭压缩？
-- **实验**：运行上游一个最小测试（如 `crc32c_test`/`coding_test`），记录命令与耗时。
+  - 为什么参考实现与移植实现必须分离构建？
+  - 为什么对照代码要固定 commit，而不是跟随 `main`？
+- **实验**：无；上游测试由用户独立运行。
 
 ---
 
@@ -158,8 +153,8 @@ P8 兼容/加固/验收（T801-T806）
 - **上游**：`include/leveldb/slice.h`；全仓库对 `std::string` 的使用（`util/coding.h`、`status.cc`、`logging.cc` 等）
 - **目标**：实现按值传递的只读字节视图（Slice）和可变字节缓冲（替代 `std::string`）。
 - **设计/交付**：
-  - `include/cleveldb/slice.h`：`cldb_slice_t {const char *data; size_t size;}`；make/empty/size/data/compare/equal/starts_with/remove_prefix。
-  - `src/util/buf.h/.c`：`cldb_buf_t {char *data; size_t size; size_t capacity;}`；init/free/clear/reserve/resize/append/append_char/append_slice/assign/swap/slice/c_str。
+  - `include/cleveldb/slice.h`：`cldb_slice_t {const char *data; size_t size;}`；make/empty/is_empty/size/data/compare/equal/starts_with/remove_prefix。
+  - `src/util/buf.h/.c`：`cldb_buf_t {char *data; size_t size; size_t capacity;}`；init/free/clear/reserve/resize/append/append_char/append_slice/assign/swap/slice/cstr。
   - 保证 `data[size]=='\0'`（方便路径/日志），但 Slice 语义不依赖 NUL。
   - 所有增长检查 `SIZE_MAX` 溢出；自追加必须安全（源指针可能因 realloc 失效）。
 - **验收**：

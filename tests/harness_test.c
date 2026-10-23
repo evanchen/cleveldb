@@ -1,8 +1,3 @@
-/*
- * T002 自测：断言、过滤与失败路径示例。
- * 失败示例默认跳过，由 CTest 设置 CLDB_TEST_ENABLE_FAILURE=1 触发。
- */
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,12 +22,15 @@ CLDB_TEST(harness_expect_pass) {
   CLDB_EXPECT_EQ_INT(1, value);
 }
 
-CLDB_TEST(platform_name_is_linux) { CLDB_ASSERT_EQ_STR("linux", cldb_platform_name()); }
+CLDB_TEST(platform_name_is_linux) {
+  CLDB_ASSERT_EQ_STR("linux", cldb_platform_name());
+}
 
 CLDB_TEST(harness_filter_target) { CLDB_EXPECT_TRUE(true); }
 
 CLDB_TEST(harness_filter_other) { CLDB_EXPECT_TRUE(true); }
 
+/* 默认通过；设置 CLDB_TEST_ENABLE_FAILURE=1 时故意失败。 */
 CLDB_TEST(harness_failure_example) {
   const char *enabled = getenv("CLDB_TEST_ENABLE_FAILURE");
 
