@@ -56,23 +56,23 @@ P8 兼容/加固/验收（T801-T806）
 
 # P0：工程脚手架
 
-## T001 工程骨架与 CMake
+## T001 工程骨架与 Make
 
 - **依赖**：无
-- **上游**：`CMakeLists.txt` 的目录组织方式（仅参考，不复制 C++ 构建逻辑）
+- **上游**：LevelDB 的目录组织方式与构建选项（仅参考，不复制 C++ 构建逻辑）
 - **目标**：建立可重复构建的 C11 项目骨架，后续任务只加文件，不改构建结构。
 - **设计/交付**：
   - 目录：`include/cleveldb/`、`src/{port,util,db,table,helpers/memenv}/`、`tests/`、`tools/`、`examples/`。
-  - CMake 目标：`cleveldb`（静态库默认）、`cleveldb_tests`、可选 `cldb_dump`/`cldb_bench`；`C_STANDARD 11`、`C_EXTENSIONS OFF`。
-  - 默认不引入任何第三方库；Snappy/Zstd 只作为 T704 的可选开关 `CLDB_WITH_SNAPPY`/`CLDB_WITH_ZSTD`（默认 OFF）。测试框架和基准自建，不依赖 GoogleTest/Google Benchmark。
+  - Make 目标：`lib`（静态库 `libcleveldb.a`）、`tests`（`cleveldb_tests`）、可选 `tools`（`cldb_dump`/`cldb_bench`）；`-std=c11`。
+  - 默认不引入任何第三方库；Snappy/Zstd 只作为 T704 的可选 Make 变量 `CLDB_WITH_SNAPPY`/`CLDB_WITH_ZSTD`（默认 0）。测试框架和基准自建，不依赖 GoogleTest/Google Benchmark。
   - 自动收集 `src/**/*.c`；公开头文件仅从 `include/` 搜索；内部头文件不安装。
-  - 平台检测：定义 `CLDB_PLATFORM_LINUX`；在非 Linux 平台用 `#error` 明确拒绝（本库只支持 Linux）。
-  - Linux 特性宏：`_GNU_SOURCE`（或 `_POSIX_C_SOURCE=200809L` + `_DEFAULT_SOURCE`）；链接 pthread（`find_package(Threads REQUIRED)` / `Threads::Threads`）。
-  - 编译选项：GCC/Clang `-Wall -Wextra -Wpedantic -Wshadow`；Debug/Release 配置。
+  - 平台检测：定义 `CLDB_PLATFORM_LINUX`；Makefile 入口与 `#error` 在非 Linux 平台明确拒绝（本库只支持 Linux）。
+  - Linux 特性宏：`_GNU_SOURCE`；链接 pthread（`-pthread`）。
+  - 编译选项：GCC/Clang `-Wall -Wextra -Wpedantic -Wshadow`；`BUILD=debug|release` 切换配置。
   - `README.md` 写明 Linux 构建命令、测试命令、目录约定。
 - **验收**：
-  - 在 Linux 上用 GCC 与 Clang 各成功配置、构建一次。
-  - `ctest` 能运行一个占位测试；Release/Debug 均可。
+  - 在 Linux 上用 GCC 与 Clang 各成功构建一次。
+  - `make test` 能运行一个占位测试；Release/Debug 均可。
   - 默认配置不要求安装 Snappy/Zstd/GoogleTest/Google Benchmark；库和测试程序只链接 libc/pthread，不出现 libstdc++。
   - 无未使用变量/隐式函数声明等基础警告。
 - **吃透检查点**：
@@ -93,8 +93,9 @@ P8 兼容/加固/验收（T801-T806）
     - 断言：`CLDB_ASSERT_TRUE/FALSE`、`CLDB_ASSERT_EQ_INT/UINT/PTR/STR`；失败记录文件/行号并继续（EXPECT）或终止当前测试（ASSERT）。OK/STATUS 断言依赖状态类型，延后到 T102。
     - 命令行：`--filter=substr`、`--list`、`--repeat=N`；返回非零表示失败。
     - 临时目录辅助延后到 T114（依赖 `cldb_env` 的 `GetTestDirectory`）。
-  - CMake 注册 `cleveldb_tests` 到 CTest。
+  - `make test`/`make check` 直接运行 `cleveldb_tests`。
 - **验收**：
+  - `make check` 一次覆盖完整、过滤、列表、重复与故意失败路径。
   - 至少 3 个通过/失败/过滤示例；故意失败时退出码非零且输出定位。
   - 在 Linux 上输出格式稳定、可解析（GCC/Clang 构建一致）。
   - 断言宏不吞掉副作用（例如只求值一次）。
@@ -442,7 +443,7 @@ P8 兼容/加固/验收（T801-T806）
   - 调度 1000 个任务：并发度为 1、顺序为 FIFO、空闲后仍能唤醒。
   - 时间测量误差可接受；默认 Env 重复获取返回同一指针。
   - 测试临时目录互不冲突，清理后不残留。
-  - CMake 只编译 `env_posix.c`/`port_posix.c`；非 Linux 平台在配置或编译期明确报错。
+  - 只包含 Linux/POSIX 实现；非 Linux 平台在 Make 入口或编译期明确报错。
 - **吃透检查点**：
   - `pread` 为什么天然适合 RandomAccessFile 的线程安全？
   - 上游 stock Env 的 `GetChildren` 为什么保留 `.`/`..`？谁负责过滤它们？
@@ -509,7 +510,7 @@ P8 兼容/加固/验收（T801-T806）
   - MemEnv 可被外部测试使用；默认 Env 在 Linux 上可用。
   - 关键 golden：编码、CRC、Bloom、文件名、CURRENT 已固定。
   - 代码审查：每个模块头文件写明所有权、错误路径和锁要求。
-  - 非 Linux 平台在 CMake 配置或编译期被明确拒绝。
+  - 非 Linux 平台在 Make 入口或编译期被明确拒绝。
 - **吃透检查点（抽样）**：
   - 从 `cldb_buf_t` 到 `cldb_slice_t` 的所有权转换是否有悬垂风险？
   - Cache 的 deleter 与 Iterator cleanup 在资源释放顺序上的异同？
@@ -595,7 +596,7 @@ P8 兼容/加固/验收（T801-T806）
   - 固定输入记录序列的 WAL 字节与上游 `log::Writer` 输出逐字节一致（用 C++ 辅助程序或预先保存的 golden）。
   - C 版 Reader 能读取上游生成的 WAL；上游 Reader 能读取 C 版 WAL（若 C++ 辅助可用）。
   - 截断/翻位/类型破坏的注入矩阵通过；恢复时只丢损坏尾部。
-  - 相关测试加入 CTest；ASan/UBSan 无报告。
+  - 相关测试纳入 `make check`；ASan/UBSan 无报告。
 - **吃透检查点**：
   - 哪些差异会破坏 WAL 兼容性（CRC 范围、Mask、类型编号、块大小）？
   - 为什么“读到 EOF”不等于“文件完整”？
@@ -1660,10 +1661,10 @@ P8 兼容/加固/验收（T801-T806）
 ## T704 可选压缩后端（Snappy/Zstd）
 
 - **依赖**：T403, T405, T406, T116
-- **上游**：`table/format.cc`、`table/table_builder.cc`、`port/port_stdcxx.h`、`CMakeLists.txt` 的 Snappy/Zstd 检测
+- **上游**：`table/format.cc`、`table/table_builder.cc`、`port/port_stdcxx.h`、上游构建脚本的 Snappy/Zstd 检测
 - **目标**：支持读取/写入 Snappy 与 Zstd 压缩块，保持与上游磁盘格式一致。
 - **设计/交付**：
-  - 构建开关：CMake 选项 `CLDB_WITH_SNAPPY`/`CLDB_WITH_ZSTD`（默认 OFF）；开启时用 `find_path` + `find_library` 同时找到头文件和库，定义 `CLDB_HAVE_SNAPPY=1`/`CLDB_HAVE_ZSTD=1` 并链接，配置期缺依赖直接报错。
+  - 构建开关：Make 变量 `CLDB_WITH_SNAPPY=1`/`CLDB_WITH_ZSTD=1`（默认关闭）；开启时同时找到头文件和库，定义 `CLDB_HAVE_SNAPPY=1`/`CLDB_HAVE_ZSTD=1` 并链接，构建期缺依赖直接报错。
   - Snappy：只使用 `snappy-c.h` 的 C API（`snappy_max_compressed_length`、`snappy_compress`、`snappy_uncompressed_length`、`snappy_uncompress`），不直接调用 C++ `snappy::*`；注意系统 `libsnappy.so` 自身可能传递依赖 libstdc++，这是可接受的库依赖，不来自本项目源码。
   - Zstd：使用 `zstd.h` 的 C API（`ZSTD_compressBound`、`ZSTD_compress`、`ZSTD_getFrameContentSize`、`ZSTD_decompress`、`ZSTD_isError`）；一次性 API 足够，压缩字节不要求与上游逐字节相同，但必须是合法 zstd frame。
   - 第三方库不复制源码/子模块；Debian/Ubuntu 包为 `libsnappy-dev`、`libzstd-dev`，Fedora 为 `snappy-devel`、`libzstd-devel`；启用时在 `THIRD_PARTY_NOTICES` 记录许可证。
@@ -1675,7 +1676,7 @@ P8 兼容/加固/验收（T801-T806）
   - 四种组合 round-trip：no/no、snappy、zstd；12.5% 阈值上下；不可压缩数据回退 no。
   - CRC 覆盖范围字节级 golden；损坏压缩块/未知 type 的错误。
   - C 写 → C++ 读、C++ 写 → C 读（启用对应库）；C++ 默认 Snappy DB 可读。
-  - 默认构建（两开关 OFF）不需要安装 Snappy/Zstd，测试程序不链接 libstdc++；分别开启两个开关都能配置、构建、通过测试。
+  - 默认构建（两开关关闭）不需要安装 Snappy/Zstd，测试程序不链接 libstdc++；分别开启两个开关都能构建并通过测试。
   - 未启用库时设置压缩不崩溃，写路径回退为 type=0；读取上游 Snappy/Zstd 块返回明确的 Corruption。
 - **吃透检查点**：
   - 为什么压缩单位是 block 而不是整个 SSTable？

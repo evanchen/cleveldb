@@ -15,47 +15,69 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 ## 平台与依赖
 
 - 仅支持 Linux（GCC/Clang + pthread + POSIX.1-2008）。
-- 不支持 Windows/macOS。CMake 配置期和 `src/port/platform.h` 编译期都会明确报错。
+- 不支持 Windows/macOS。`Makefile` 入口和 `src/port/platform.h` 编译期都会明确报错。
 - 默认构建不依赖任何第三方库；库和测试只链接 libc 与 pthread。
-- 可选压缩（Snappy/Zstd）是后续 T704 的构建开关，默认关闭。
+- 可选压缩（Snappy/Zstd）是后续 T704 的 Make 变量，默认关闭。
 
 ## Debian 构建
 
-```sh
-sudo apt install build-essential cmake
-# 可选：sudo apt install clang ninja-build
-
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j"$(nproc)"
-cd build && ctest --output-on-failure
-```
-
-Release 构建：
+依赖：GCC 或 Clang、GNU Make、pthread。
 
 ```sh
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
-cmake --build build-release -j"$(nproc)"
-cd build-release && ctest --output-on-failure
+sudo apt install build-essential
+# 可选：sudo apt install clang
+
+make -j"$(nproc)"
+make test
+make check
 ```
 
-Clang 构建：
+默认 Debug 构建，产物在 `build/`：`libcleveldb.a` 与 `cleveldb_tests`。
+
+Release 与 Clang 使用独立构建目录，避免对象文件混用：
 
 ```sh
-cmake -S . -B build-clang \
-  -DCMAKE_C_COMPILER=clang \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build-clang -j"$(nproc)"
-cd build-clang && ctest --output-on-failure
+make BUILD=release BUILD_DIR=build-release -j"$(nproc)"
+make BUILD=release BUILD_DIR=build-release test
+
+make CC=clang BUILD_DIR=build-clang -j"$(nproc)"
+make CC=clang BUILD_DIR=build-clang test
 ```
 
-常用 CMake 选项：
+ASan/UBSan：
 
-| 选项 | 默认 | 说明 |
+```sh
+make asan
+```
+
+常用目标：
+
+| 目标 | 说明 |
+|---|---|
+| `all` | 构建静态库和测试（默认） |
+| `lib` | 只构建 `build/libcleveldb.a` |
+| `tests` | 只构建 `build/cleveldb_tests` |
+| `tools` | 构建 `tools/*.c` |
+| `test` | 运行完整测试套件 |
+| `check` | 运行全套回归（过滤/列表/重复/失败路径） |
+| `asan` | 在 `build-asan` 下用 ASan/UBSan 跑 `check` |
+| `install` | 安装库和公开头文件 |
+| `clean` | 删除当前 `BUILD_DIR` |
+| `clean-all` | 删除 `build`、`build-asan`、`build-release`、`build-clang` |
+
+常用变量：
+
+| 变量 | 默认 | 说明 |
 |---|---|---|
-| `BUILD_SHARED_LIBS` | `OFF` | `OFF` 构建静态库 `libcleveldb.a`；`ON` 构建共享库 |
-| `CLDB_BUILD_TESTS` | `ON` | 构建 `cleveldb_tests` 并注册到 CTest |
-| `CLDB_BUILD_TOOLS` | `OFF` | 对应源文件存在时构建 `cldb_dump` / `cldb_bench` |
-| `CLDB_WERROR` | `OFF` | 把编译警告当作错误（CI 用） |
+| `BUILD` | `debug` | `debug` 或 `release` |
+| `BUILD_DIR` | `build` | 构建目录 |
+| `CC` | `cc` | C 编译器 |
+| `WERROR` | `0` | `1` 时把编译警告当作错误 |
+| `SANITIZE` | `0` | `1` 时启用 ASan/UBSan |
+| `PREFIX` | `/usr/local` | `install` 安装前缀 |
+| `DESTDIR` | 空 | `install` 暂存目录 |
+
+`make help` 列出全部目标与变量。
 
 ## 目录约定
 
@@ -70,6 +92,7 @@ tests/              单元测试、差分测试、兼容测试
 tools/              cldb_dump、cldb_bench
 examples/           公开 API 示例
 doc/                计划、任务与规范
+Makefile            构建入口（GNU Make）
 ```
 
 内部头文件放在 `src/` 下，不对外安装；`#include "port/..."` 等路径由库的私有 include 目录解析。
@@ -78,6 +101,6 @@ doc/                计划、任务与规范
 
 1. 只实现一个任务，保持改动独立可审阅。
 2. 在 Debian 上按上面的命令构建，运行本任务相关测试。
-3. 用 ASan/UBSan 构建再跑一遍相关测试。
+3. 运行 `make asan`，用 ASan/UBSan 再跑一遍测试。
 4. 审阅本任务的 `git diff`/新增代码，对照上游实现理解所有权、锁和错误路径。
 5. 回答任务里的“吃透检查点”，再进入下一个任务。

@@ -1,14 +1,6 @@
-# CMake 构建目录
+# 构建目录
 build/
 build-*/
-
-# CMake 生成文件
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-CTestTestfile.cmake
-Testing/
-compile_commands.json
 
 # 编译产物
 *.o

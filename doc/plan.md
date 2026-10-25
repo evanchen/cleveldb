@@ -121,7 +121,7 @@ doc/plan.md, doc/tasks.md      本计划与任务
 
 ### 1.6 第三方依赖策略（C 版）
 
-上游 LevelDB 的核心本身不依赖第三方库；`CMakeLists.txt` 里的 Snappy/Zstd/CRC32C/tcmalloc 检测全部是可选项，只有测试和基准会拉取 GoogleTest、Google Benchmark 子模块。C 版沿用“核心零第三方”的原则：
+上游 LevelDB 的核心本身不依赖第三方库；上游构建脚本里的 Snappy/Zstd/CRC32C/tcmalloc 检测全部是可选项，只有测试和基准会拉取 GoogleTest、Google Benchmark 子模块。C 版沿用“核心零第三方”的原则：
 
 | 依赖 | 上游用途 | 上游是否必需 | C 版策略 |
 |---|---|---|---|
@@ -137,9 +137,9 @@ doc/plan.md, doc/tasks.md      本计划与任务
 具体规则：
 
 - `libcleveldb` 的强制依赖只有 C11 标准库 + Linux/POSIX（libc、pthread）；默认构建不依赖 libstdc++ 或任何 C++ ABI。
-- 不把第三方源码或 git submodule 复制进本仓库；Snappy/Zstd 通过系统包或显式路径链接。这一点与上游 CMake 的 `check_library_exists` 思路一致，但 C 版同时要求找到头文件，配置期缺依赖直接报错。
-- 可选压缩由 `CLDB_WITH_SNAPPY`、`CLDB_WITH_ZSTD` 控制，默认 OFF。
-- 默认构建（两个开关均 OFF）写出的块全部为 type=0，可与同样未启用压缩的 C++ LevelDB 双向互读；要读上游默认配置（Snappy）创建的 DB，必须启用 `CLDB_WITH_SNAPPY`。
+- 不把第三方源码或 git submodule 复制进本仓库；Snappy/Zstd 通过系统包或显式路径链接。这一点与上游构建脚本的 `check_library_exists` 思路一致，但 C 版同时要求找到头文件，构建期缺依赖直接报错。
+- 可选压缩由 `CLDB_WITH_SNAPPY`、`CLDB_WITH_ZSTD` 控制，默认 0（关闭）。
+- 默认构建（两个开关均关闭）写出的块全部为 type=0，可与同样未启用压缩的 C++ LevelDB 双向互读；要读上游默认配置（Snappy）创建的 DB，必须启用 `CLDB_WITH_SNAPPY`。
 - 使用 C API 不代表运行时完全没有 C++ 依赖：系统 `libsnappy.so` 本身通常以 C++ 实现并传递依赖 libstdc++；这是启用 Snappy 后的库传递依赖，不是 `libcleveldb` 源码的 C++ 依赖。若静态链接 `libsnappy.a`，还需显式加 `-lstdc++`；动态链接则由 `libsnappy.so` 的 DT_NEEDED 自动带入。Zstd 是纯 C 库，无此问题。若严格要求进程不加载 libstdc++，只能自行实现 Snappy 或换用纯 C 实现；首版不采用。
 - 允许的第三方许可证：Snappy BSD-3-Clause、Zstd BSD-3-Clause；启用时在 `THIRD_PARTY_NOTICES` 中记录。tcmalloc（Apache-2.0）等基准可选项不进入发布库。
 
@@ -1014,8 +1014,7 @@ cldb_status_t cldb_repair_db(const char *name, const cldb_options_t *opt);
 
 ```
 E:\github\cleveldb\
-├─ CMakeLists.txt
-├─ cmake/
+├─ Makefile
 ├─ doc/
 │  ├─ plan.md
 │  ├─ tasks.md
@@ -1056,20 +1055,23 @@ E:\github\cleveldb\
 
 ### 6.10 构建与工具链
 
-- CMake ≥ 3.16，C11（`C_STANDARD 11`，`C_EXTENSIONS OFF`）。
-- Linux 特性宏与链接：定义 `_GNU_SOURCE`（或等价的 `_POSIX_C_SOURCE=200809L` + `_DEFAULT_SOURCE`），确保 `pread`、`O_CLOEXEC`、`fdatasync`、`nanosleep`、`gettimeofday` 在严格 C11 下可见；链接 pthread（CMake `find_package(Threads REQUIRED)` + `Threads::Threads`）。
-- 目标：
-  - `cleveldb`（静态库，默认；可选 `BUILD_SHARED_LIBS`）
-  - `cleveldb_tests`（CTest）
-  - `cldb_dump`、`cldb_bench`（可选 target）
-- 第三方依赖：默认仅 libc/pthread；`CLDB_WITH_SNAPPY`/`CLDB_WITH_ZSTD` 默认 OFF，开启时用 `find_path` + `find_library` 且要求头文件与库同时存在；不 vendor 第三方源码，不使用 C++ 测试/基准框架（详见 §1.6）。
-- 编译选项（按编译器探测）：
-  - GCC/Clang：`-Wall -Wextra -Wpedantic -Wshadow -Wconversion`（`-Wconversion` 可先警告不错误）、`-fno-common`；
-  - Debug：`-O0 -g3 -DCLDB_DEBUG=1`；Release：`-O2 -DNDEBUG`；
-  - Sanitizer：`-fsanitize=address,undefined`（Linux GCC/Clang）。
-- 测试：CTest 注册多个测试可执行文件或单一 runner；每个测试可在 MemEnv 上运行，不污染源码目录。
+- GNU Make + GCC/Clang，C11（`-std=c11`）。
+- Linux 特性宏与链接：定义 `_GNU_SOURCE`，确保 `pread`、`O_CLOEXEC`、`fdatasync`、`nanosleep`、`gettimeofday` 在严格 C11 下可见；链接 pthread（`-pthread`）。
+- Make 目标：
+  - `make`：构建静态库 `build/libcleveldb.a` 与测试 `build/cleveldb_tests`；
+  - `make test` / `make check`：运行完整套件 / 追加过滤、列表、重复、失败路径回归；
+  - `make BUILD=release BUILD_DIR=build-release ...`：Release 使用独立对象目录；
+  - `make asan`：在 `build-asan` 下用 ASan/UBSan 跑 `check`；
+  - `make tools`、`make install`、`make clean`。
+- 第三方依赖：默认仅 libc/pthread；Snappy/Zstd 由 T704 引入 Make 变量 `CLDB_WITH_SNAPPY`/`CLDB_WITH_ZSTD`（默认 0），开启时定义 `CLDB_HAVE_*` 并链接系统库；不 vendor 第三方源码，不使用 C++ 测试/基准框架（详见 §1.6）。
+- 编译选项：
+  - GCC/Clang：`-Wall -Wextra -Wpedantic -Wshadow`（`-Wconversion` 作为逐步收敛项，可先警告不错误）；
+  - `BUILD=debug`：`-O0 -g3 -DCLDB_DEBUG=1`；`BUILD=release`：`-O2 -DNDEBUG`；
+  - `SANITIZE=1`：`-fsanitize=address,undefined -fno-omit-frame-pointer`；
+  - `WERROR=1`：`-Werror`，默认关闭，避免本地工具链差异阻塞学习。
+- 测试：`cleveldb_tests` 单一 runner，支持过滤/列表/重复；`make check` 覆盖五条回归；测试在 MemEnv 上运行时不污染源码目录。
 - 代码格式：clang-format（Google 基风格，2 空格缩进，80 列，指针右对齐）。
-- 静态检查：clang-tidy（可选）；`-Werror` 仅在 CI 的专用 job 开启，避免本地工具链差异阻塞学习。
+- 静态检查：clang-tidy（可选）；`WERROR=1` 仅在 CI 的专用 job 开启。
 - CI 矩阵（仅 Linux）：GCC + Clang；可选 ASan/TSAN job。
 
 ### 6.11 编码规范（摘要）
@@ -1090,7 +1092,7 @@ E:\github\cleveldb\
 
 | 阶段 | 名称 | 核心产出 | 退出条件（Gate） |
 |---|---|---|---|
-| P0 | 脚手架 | CMake、测试框架、规范、上游参考约定 | 空项目可在 Linux 构建；测试 runner 可跑 |
+| P0 | 脚手架 | Make、测试框架、规范、上游参考约定 | 空项目可在 Linux 构建；测试 runner 可跑 |
 | P1 | 基础库 | Slice/Status/Buffer、编码、哈希/随机、Arena、CRC32C、port、Comparator、Iterator、Bloom、LRU Cache、Env/MemEnv、文件名/日志/选项 | 所有 util 单测通过；MemEnv 可用于后续测试；格式基元有 golden 向量 |
 | P2 | WAL | log format、Writer、Reader | 分片/边界/校验/重同步测试通过；与上游 WAL 字节兼容 |
 | P3 | 内存引擎 | dbformat、WriteBatch、SkipList、MemTable、SnapshotList | 内存读写、序列、快照、并发插入测试通过 |
@@ -1105,7 +1107,7 @@ E:\github\cleveldb\
 - [ ] 当前阶段所有任务 DONE（代码 + 测试 + 增量审阅 + 自检）。
 - [ ] 无已知 P0/P1 缺陷；已知限制写入 plan/tasks 的“已知问题”。
 - [ ] 阶段新增格式/行为有 golden test 或上游测试对应。
-- [ ] 一次完整的 `ctest` 通过（Debug + Release 至少各一次）。
+- [ ] 一次完整的 `make check` 通过（Debug + Release 至少各一次）。
 - [ ] 代码审查：所有权、锁、错误路径、溢出。
 - [ ] 学习验收：随机抽 3 个本阶段问题，能脱稿回答并做一个小实验。
 
@@ -1190,7 +1192,7 @@ Golden 文件放在 `tests/golden/`，用只读方式打开；更新 golden 必�
 ### 8.7 测试门禁（每个任务/阶段）
 
 - 任务级：新增测试全过 + 相关旧测试全过 + sanitizer 无新报告。
-- 阶段级：完整 ctest + 至少一个差分/兼容测试 + 损坏测试。
+- 阶段级：完整 `make check` + 至少一个差分/兼容测试 + 损坏测试。
 - 发布级（P8）：双向兼容矩阵、随机差分、长时间压测、内存检查、benchmark 报告、学习验收。
 
 ---

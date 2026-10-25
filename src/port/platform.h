@@ -1,7 +1,7 @@
 #ifndef CLDB_SRC_PORT_PLATFORM_H_
 #define CLDB_SRC_PORT_PLATFORM_H_
 
-/* 仅支持 Linux：CMake 配置期检查，这里再做一次编译期拦截。 */
+/* 仅支持 Linux：编译期拦截；Makefile 入口也会检查。 */
 #if !defined(__linux__)
 #error "cleveldb only supports Linux"
 #endif
