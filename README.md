@@ -30,6 +30,7 @@ sudo apt install build-essential
 make -j"$(nproc)"
 make test
 make check
+make strict-check
 ```
 
 默认 Debug 构建，产物在 `build/`：`libcleveldb.a` 与 `cleveldb_tests`。
@@ -60,6 +61,7 @@ make asan
 | `tools` | 构建 `tools/*.c` |
 | `test` | 运行完整测试套件 |
 | `check` | 运行全套回归（过滤/列表/重复/失败路径） |
+| `strict-check` | 对全部源码做严格告警语法检查（Debug/NDEBUG） |
 | `asan` | 在 `build-asan` 下用 ASan/UBSan 跑 `check` |
 | `install` | 安装库和公开头文件 |
 | `clean` | 删除当前 `BUILD_DIR` |

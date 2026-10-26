@@ -48,7 +48,7 @@ TEST_OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRCS))
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/%,$(TOOL_SRCS))
 DEPFILES := $(LIB_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
-.PHONY: all lib tests tools test check asan clean clean-all install help
+.PHONY: all lib tests tools test check strict-check asan clean clean-all install help
 .DEFAULT_GOAL := all
 
 all: $(LIB) $(TEST_BIN)
@@ -104,6 +104,20 @@ check: $(TEST_BIN)
 	fi; \
 	echo "==> check passed"
 
+# 只做语法/告警检查，不依赖 BUILD；Debug 与 NDEBUG 两种断言模式都覆盖。
+STRICT_CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -Wshadow \
+  -Wconversion -Wsign-conversion -Werror -fsyntax-only
+STRICT_SRCS := $(LIB_SRCS) $(TEST_SRCS) $(TOOL_SRCS)
+
+strict-check:
+	@set -e; \
+	echo "==> strict check (CLDB_DEBUG=1)"; \
+	$(CC) $(DEFINES) $(INCLUDES) $(EXTRA_CPPFLAGS) -DCLDB_DEBUG=1 \
+	  $(STRICT_CFLAGS) $(STRICT_SRCS); \
+	echo "==> strict check (NDEBUG)"; \
+	$(CC) $(DEFINES) $(INCLUDES) $(EXTRA_CPPFLAGS) -DNDEBUG \
+	  $(STRICT_CFLAGS) $(STRICT_SRCS)
+
 asan:
 	$(MAKE) BUILD_DIR=build-asan clean
 	$(MAKE) BUILD=debug BUILD_DIR=build-asan SANITIZE=1 check
@@ -137,6 +151,7 @@ help:
 	  "  tools     构建 tools/*.c" \
 	  "  test      运行完整测试套件" \
 	  "  check     运行全套回归（过滤/列表/重复/失败路径）" \
+	  "  strict-check 严格告警语法检查（Debug/NDEBUG）" \
 	  "  asan      在 build-asan 下用 ASan/UBSan 跑 check" \
 	  "  clean     删除当前 BUILD_DIR" \
 	  "  clean-all 删除 build/build-asan/build-release/build-clang" \
