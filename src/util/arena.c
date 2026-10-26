@@ -1,8 +1,10 @@
 #include "util/arena.h"
 
-#include <assert.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+#include "port/port.h"
 
 /* 对应上游 kBlockSize；小于 1/4 块的分配从当前块切分。 */
 static const size_t kBlockSize = 4096;
@@ -12,6 +14,8 @@ static char *arena_new_block(cldb_arena_t *arena, size_t block_bytes) {
   char *block;
   char **blocks;
   size_t new_capacity;
+  uint64_t increment;
+  uint64_t usage;
 
   if (block_bytes == 0 || block_bytes > SIZE_MAX - sizeof(char *)) {
     return NULL;
@@ -42,13 +46,16 @@ static char *arena_new_block(cldb_arena_t *arena, size_t block_bytes) {
     arena->blocks = blocks;
     arena->block_capacity = new_capacity;
   }
-  if (arena->memory_usage > SIZE_MAX - (block_bytes + sizeof(char *))) {
+  increment = (uint64_t)block_bytes + (uint64_t)sizeof(char *);
+  usage = cldb_atomic_u64_load(&arena->memory_usage, memory_order_relaxed);
+  if (usage > UINT64_MAX - increment) {
     free(block);
     return NULL;
   }
   arena->blocks[arena->block_count] = block;
   ++arena->block_count;
-  arena->memory_usage += block_bytes + sizeof(char *);
+  cldb_atomic_u64_fetch_add(&arena->memory_usage, increment,
+                            memory_order_relaxed);
   return block;
 }
 
@@ -80,7 +87,7 @@ void cldb_arena_init(cldb_arena_t *arena) {
   arena->blocks = NULL;
   arena->block_count = 0;
   arena->block_capacity = 0;
-  arena->memory_usage = 0;
+  cldb_atomic_u64_init(&arena->memory_usage, 0);
 }
 
 void cldb_arena_destroy(cldb_arena_t *arena) {
@@ -132,11 +139,15 @@ char *cldb_arena_allocate_aligned(cldb_arena_t *arena, size_t bytes) {
     /* fallback 总是返回新块首地址；malloc 存储满足 max_align_t 对齐。 */
     result = arena_allocate_fallback(arena, bytes);
   }
-  /* 与上游一致，调试期校验最终结果；release 由 NDEBUG 移除。 */
-  assert(((uintptr_t)result & (align - 1)) == 0);
+  /* 与上游一致，调试期校验最终结果；release 编译为空操作。 */
+  CLDB_ASSERT(((uintptr_t)result & (align - 1)) == 0);
   return result;
 }
 
 size_t cldb_arena_memory_usage(const cldb_arena_t *arena) {
-  return arena != NULL ? arena->memory_usage : 0;
+  if (arena == NULL) {
+    return 0;
+  }
+  return (size_t)cldb_atomic_u64_load(&arena->memory_usage,
+                                      memory_order_relaxed);
 }

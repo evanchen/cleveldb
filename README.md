@@ -10,12 +10,12 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T106 CRC32C。数据库功能尚未实现。
+> 当前状态：T107 平台断言与原子操作。数据库功能尚未实现。
 
 ## 平台与依赖
 
 - 仅支持 Linux（GCC/Clang + pthread + POSIX.1-2008）。
-- 不支持 Windows/macOS。`Makefile` 入口和 `src/port/platform.h` 编译期都会明确报错。
+- 不支持 Windows/macOS。`Makefile` 入口和 `src/port/port.h` 编译期都会明确报错。
 - 默认构建不依赖任何第三方库；库和测试只链接 libc 与 pthread。
 - 可选压缩（Snappy/Zstd）是后续 T704 的 Make 变量，默认关闭。
 
