@@ -1,5 +1,7 @@
 #include "util/random.h"
 
+#include <stddef.h>
+
 /* Park–Miller 最小标准生成器：M = 2^31-1，A = 16807。 */
 enum { CLDB_RANDOM_M = 2147483647 };
 
