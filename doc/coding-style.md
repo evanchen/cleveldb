@@ -25,7 +25,7 @@
 
 - 动词表达语义：`create` 返回新对象，`init` 初始化调用者提供的内存，`destroy` 释放对象，`free` 释放缓冲内容。
 - 失败时返回状态的函数，输出参数放在最后；输入参数在前。例如：
-  `cldb_example_result_t cldb_example_create(const char *name, cldb_example_t **out);`
+  `cldb_status_t cldb_example_create(const char *name, cldb_example_t **out);`
 - 长度用 `_size`/`_len`，数量用 `_count`，偏移用 `_offset`；不要混用。
 - 返回 `bool` 的名字用 `is_`/`has_`，且必须无分配、无诊断信息。可能失败并需要原因的操作用状态返回。
 - 调用者已持有锁的函数加 `_locked` 后缀；内部字段 `mutex` 明确表示保护范围。
@@ -69,7 +69,7 @@
 
 ### 4.1 错误通道
 
-- 可能失败且需要上下文的操作返回 `cldb_status_t`（T102 后）；在此之前示例模块用本地结果枚举演示同样规则。
+- 可能失败且需要上下文的操作返回 `cldb_status_t`；示例模块已迁移到该状态类型。
 - 只有“不可能失败或失败原因唯一”的纯操作才返回 `bool`；不得把关键错误吞成 `false`。
 - 不把全局 `errno` 当唯一错误通道；在系统调用边界读取 `errno`，映射成状态并保留上下文。
 - 错误消息只用于诊断：不参与比较、不落盘、可截断；控制流只看错误码。
@@ -93,7 +93,7 @@ cldb_status_t f(void) {
 
   buf = malloc(n);
   if (buf == NULL) {
-    s = cldb_status_io("out of memory");
+    s = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
   /* ... */
@@ -170,6 +170,8 @@ cleanup:
 - 提交前至少运行 `clang-format` 检查本任务改动的文件；不要求格式化整个历史文件。
 - 编译警告基线：`-Wall -Wextra -Wpedantic -Wshadow`；`-Wconversion` 作为逐步收敛项，CI 的专用 job 开启 `-Werror`。
 - 注释挂在函数声明、数据结构声明和字段旁；不写文件级任务说明。
+- 结构体字段注明用途、所有权与锁保护范围；函数声明注明用法、失败语义和返回值所有权。
+- 能对应上游的声明注明 LevelDB 类型/函数（如 `Slice`、`Status::ToString`），并说明 C 版的差异及原因。
 - 代码注释不写任务编号；任务背景只放在 `doc/` 文档中。
 - 注释一律中文且精简；不写大段英文注释，不重复代码已表达的信息。
 - 每行一条语句；`if/for/while` 必须带花括号；`switch` 覆盖所有枚举值，必要时用 `default` 兜底。

@@ -7,20 +7,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 注册表项；对应 gtest 内部登记的测试名与函数。 */
 typedef struct {
-  const char *name;
-  cldb_test_fn_t fn;
+  const char *name;  /* borrowed；来自 CLDB_RUN_TEST(#name) 的静态字符串 */
+  cldb_test_fn_t fn; /* 测试函数，由 CLDB_TEST 定义 */
 } cldb_test_case_t;
 
+/* 动态注册表；容量按 2 倍增长，避免启动时假定测试数量。 */
 static cldb_test_case_t *g_tests;
 static size_t g_test_count;
 static size_t g_test_capacity;
-static bool g_registration_failed;
+static bool g_registration_failed; /* 注册出错；运行开始时统一返回失败 */
 
+/* 运行期计数；当前测试失败数用于判定，总数用于最终汇总。 */
 static size_t g_current_failures;
 static size_t g_total_failures;
-static bool g_in_test;
-static jmp_buf g_abort_jmp;
+static bool g_in_test;      /* 是否在测试内；防止 ASSERT 在测试外跳转 */
+static jmp_buf g_abort_jmp; /* 当前测试的恢复点；每个测试由 setjmp 重建 */
 
 static void registration_error(const char *message, const char *name) {
   fprintf(stderr, "test registration failed: %s: %s\n", message,
@@ -150,6 +153,7 @@ void cldb_test_check_str(const char *file, int line, const char *expr,
   abort_if_fatal(fatal);
 }
 
+/* 运行单个测试；setjmp 建立 ASSERT 恢复点，对应 gtest 的单测试执行。 */
 static bool run_one(const cldb_test_case_t *test) {
   g_current_failures = 0;
   g_in_test = true;

@@ -5,13 +5,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 字段所有权与锁保护范围写在这里，修改时同步更新。 */
+/* 私有布局；对应上游把实现细节留在 .cc 的惯例。
+ * 字段所有权与锁保护范围在此集中说明，修改时同步更新。 */
 struct cldb_example {
-  pthread_mutex_t mutex; /* 保护 name/value */
-  char *name;            /* owned；受 mutex 保护 */
-  int64_t value;         /* 受 mutex 保护 */
+  pthread_mutex_t mutex; /* 保护 name/value；C 版替代上游 port::Mutex */
+  char *name;            /* owned；读写都在 mutex 内；对应上游受锁保护的成员 */
+  int64_t value;         /* 受 mutex 保护；演示 DBImpl 式的读-改-写 */
 };
 
+/* 深拷贝 C 字符串；对应上游用 std::string 复制入参、由对象接管所有权。 */
 static char *copy_string(const char *s) {
   size_t len = strlen(s);
   char *copy = malloc(len + 1);
@@ -22,6 +24,7 @@ static char *copy_string(const char *s) {
   return copy;
 }
 
+/* 检测 int64 加法溢出；上游依赖断言/未定义行为，C 版改为显式错误。 */
 static bool add_overflows(int64_t a, int64_t b) {
   if (b > 0) {
     return a > INT64_MAX - b;
@@ -29,35 +32,36 @@ static bool add_overflows(int64_t a, int64_t b) {
   return a < INT64_MIN - b;
 }
 
-cldb_example_result_t cldb_example_create(const char *name,
-                                          cldb_example_t **out) {
-  cldb_example_result_t result = CLDB_EXAMPLE_OK;
+cldb_status_t cldb_example_create(const char *name, cldb_example_t **out) {
+  cldb_status_t status = cldb_status_ok();
   cldb_example_t *example = NULL;
   char *name_copy = NULL;
   bool mutex_ready = false;
+  int rc;
 
   if (out == NULL) {
-    return CLDB_EXAMPLE_INVALID_ARGUMENT;
+    return cldb_status_invalid_argument("cldb_example_create", "out is NULL");
   }
   *out = NULL;
   if (name == NULL) {
-    return CLDB_EXAMPLE_INVALID_ARGUMENT;
+    return cldb_status_invalid_argument("cldb_example_create", "name is NULL");
   }
 
   example = calloc(1, sizeof(*example));
   if (example == NULL) {
-    result = CLDB_EXAMPLE_OUT_OF_MEMORY;
+    status = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
-  if (pthread_mutex_init(&example->mutex, NULL) != 0) {
-    result = CLDB_EXAMPLE_SYSTEM_ERROR;
+  rc = pthread_mutex_init(&example->mutex, NULL);
+  if (rc != 0) {
+    status = cldb_status_io("pthread_mutex_init", strerror(rc));
     goto cleanup;
   }
   mutex_ready = true;
 
   name_copy = copy_string(name);
   if (name_copy == NULL) {
-    result = CLDB_EXAMPLE_OUT_OF_MEMORY;
+    status = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
 
@@ -75,7 +79,7 @@ cleanup:
     free(example->name);
     free(example);
   }
-  return result;
+  return status;
 }
 
 void cldb_example_destroy(cldb_example_t *example) {
@@ -91,77 +95,70 @@ const char *cldb_example_name(cldb_example_t *example) {
   return example != NULL ? example->name : NULL;
 }
 
-cldb_example_result_t cldb_example_set_name(cldb_example_t *example,
-                                            const char *name) {
+cldb_status_t cldb_example_set_name(cldb_example_t *example,
+                                    const char *name) {
   char *copy;
+  int rc;
 
   if (example == NULL || name == NULL) {
-    return CLDB_EXAMPLE_INVALID_ARGUMENT;
+    return cldb_status_invalid_argument("cldb_example_set_name",
+                                        "example or name is NULL");
   }
   copy = copy_string(name);
   if (copy == NULL) {
-    return CLDB_EXAMPLE_OUT_OF_MEMORY;
+    return cldb_status_io("out of memory", NULL);
   }
-  if (pthread_mutex_lock(&example->mutex) != 0) {
+  rc = pthread_mutex_lock(&example->mutex);
+  if (rc != 0) {
     free(copy);
-    return CLDB_EXAMPLE_SYSTEM_ERROR;
+    return cldb_status_io("pthread_mutex_lock", strerror(rc));
   }
   free(example->name);
   example->name = copy;
   (void)pthread_mutex_unlock(&example->mutex);
-  return CLDB_EXAMPLE_OK;
+  return cldb_status_ok();
 }
 
-cldb_example_result_t cldb_example_add(cldb_example_t *example, int64_t delta,
-                                       int64_t *out) {
-  cldb_example_result_t result = CLDB_EXAMPLE_OK;
+cldb_status_t cldb_example_add(cldb_example_t *example, int64_t delta,
+                               int64_t *out) {
+  cldb_status_t status = cldb_status_ok();
   int64_t next = 0;
+  int rc;
 
   if (example == NULL) {
-    return CLDB_EXAMPLE_INVALID_ARGUMENT;
+    return cldb_status_invalid_argument("cldb_example_add", "example is NULL");
   }
-  if (pthread_mutex_lock(&example->mutex) != 0) {
-    return CLDB_EXAMPLE_SYSTEM_ERROR;
+  rc = pthread_mutex_lock(&example->mutex);
+  if (rc != 0) {
+    return cldb_status_io("pthread_mutex_lock", strerror(rc));
   }
   if (add_overflows(example->value, delta)) {
-    result = CLDB_EXAMPLE_RANGE_ERROR;
+    status = cldb_status_invalid_argument("cldb_example_add",
+                                          "integer overflow");
   } else {
     example->value += delta;
     next = example->value;
   }
   (void)pthread_mutex_unlock(&example->mutex);
 
-  if (result == CLDB_EXAMPLE_OK && out != NULL) {
+  if (cldb_status_is_ok(status) && out != NULL) {
     *out = next;
   }
-  return result;
+  return status;
 }
 
-cldb_example_result_t cldb_example_get_value(cldb_example_t *example,
-                                             int64_t *out) {
+cldb_status_t cldb_example_get_value(cldb_example_t *example, int64_t *out) {
+  int rc;
+
   if (example == NULL || out == NULL) {
-    return CLDB_EXAMPLE_INVALID_ARGUMENT;
+    return cldb_status_invalid_argument("cldb_example_get_value",
+                                        "example or out is NULL");
   }
-  if (pthread_mutex_lock(&example->mutex) != 0) {
-    return CLDB_EXAMPLE_SYSTEM_ERROR;
+  rc = pthread_mutex_lock(&example->mutex);
+  if (rc != 0) {
+    return cldb_status_io("pthread_mutex_lock", strerror(rc));
   }
   *out = example->value;
   (void)pthread_mutex_unlock(&example->mutex);
-  return CLDB_EXAMPLE_OK;
-}
-
-const char *cldb_example_result_message(cldb_example_result_t result) {
-  switch (result) {
-    case CLDB_EXAMPLE_OK:
-      return "ok";
-    case CLDB_EXAMPLE_INVALID_ARGUMENT:
-      return "invalid argument";
-    case CLDB_EXAMPLE_OUT_OF_MEMORY:
-      return "out of memory";
-    case CLDB_EXAMPLE_RANGE_ERROR:
-      return "range error";
-    case CLDB_EXAMPLE_SYSTEM_ERROR:
-      return "system error";
-  }
-  return "unknown result";
+  return cldb_status_ok();
 }

@@ -764,13 +764,14 @@ typedef enum cldb_status_code {
 
 typedef struct cldb_status {
   cldb_status_code_t code;
-  char message[256];   /* NUL-terminated, may be truncated */
+  char message[256];   /* NUL 结尾；超长截断 */
 } cldb_status_t;
 ```
 
-- `cldb_status_ok/code/message`、`cldb_status_set`、`cldb_status_io(...)` 等构造器；
+- `cldb_status_ok/code/message/is_*`、`cldb_status_set`、`cldb_status_to_string`、`cldb_status_io(...)` 等构造器；
 - 非 OK 的 `code` 与上游数值一致，便于测试和日志；
 - 消息只用于诊断，不参与比较/落盘；截断不影响语义；
+- 上游把 `[4 字节长度][1 字节 code][消息]` 放在堆块中，拷贝时深拷贝并需要析构；C 版改为定长内联，避免分配与所有权管理，代价是消息截断；
 - 结构体可安全按值拷贝，不需要 destroy。这是对上游“不可变堆状态”的明确简化。
 
 **Buffer**（内部，替代 `std::string`）：
@@ -859,7 +860,7 @@ cldb_status_t f(void) {
   cldb_buf_t b;
   cldb_buf_init(&b);
   if (!cldb_buf_reserve(&b, n)) {
-    s = cldb_status_io("out of memory");
+    s = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
   ...

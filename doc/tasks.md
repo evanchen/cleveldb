@@ -179,7 +179,7 @@ P8 兼容/加固/验收（T801-T806）
   - `cldb_status_to_string`（写入调用者 buffer）、`code/message/is_*`。
   - 测试辅助 `tests/status_test_util.h`：`CLDB_EXPECT_OK/ASSERT_OK`、`CLDB_EXPECT_STATUS/ASSERT_STATUS`；只求值一次，失败时打印 code 与 message。
   - 把 T003 示例模块的本地 result 枚举迁移为 `cldb_status_t`，同步更新测试与文档。
-  - 阅读上游状态内部格式：4 字节长度 + 1 字节 code + 消息；解释为什么上游不做析构/释放。
+  - 阅读上游状态内部格式：4 字节长度 + 1 字节 code + 消息；解释上游为何需要析构和深拷贝，C 版内联为何无需 destroy。
 - **验收**：
   - 每个错误码的构造/转换/拷贝测试；长消息截断后仍以 NUL 结尾。
   - 与上游 `Status::ToString()` 的前缀语义对照（`NotFound: `、`Corruption: `、`IO error: ` 等）。

@@ -110,23 +110,23 @@ typedef struct cldb_foo {
 
 ## 5. create/destroy 与部分构造
 
-以下为 T102 后的目标模板；`cldb_status_*` 和复制辅助尚未实现。
+以下模板使用已实现的 `cldb_status_*`。
 
 ```c
 cldb_status_t cldb_foo_create(const char *name, cldb_foo_t **out) {
   cldb_status_t s = cldb_status_ok();
   cldb_foo_t *foo = NULL;
 
-  if (out == NULL) return cldb_status_invalid_argument("out is NULL");
+  if (out == NULL) return cldb_status_invalid_argument("out is NULL", NULL);
   *out = NULL;
   foo = calloc(1, sizeof(*foo));
   if (foo == NULL) {
-    s = cldb_status_io("out of memory");
+    s = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
   foo->name = copy_string(name); /* 返回 owned 副本，失败为 NULL */
   if (foo->name == NULL) {
-    s = cldb_status_io("out of memory");
+    s = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
   *out = foo;
