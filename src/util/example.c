@@ -1,16 +1,17 @@
 #include "util/example.h"
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "port/port_mutex.h"
+
 /* 私有布局；对应上游把实现细节留在 .cc 的惯例。
  * 字段所有权与锁保护范围在此集中说明，修改时同步更新。 */
 struct cldb_example {
-  pthread_mutex_t mutex; /* 保护 name/value；C 版替代上游 port::Mutex */
-  char *name;            /* owned；读写都在 mutex 内；对应上游受锁保护的成员 */
-  int64_t value;         /* 受 mutex 保护；演示 DBImpl 式的读-改-写 */
+  cldb_mutex_t mutex; /* owned；保护 name/value；对应上游 port::Mutex */
+  char *name;         /* owned；读写都在 mutex 内；对应上游受锁保护的成员 */
+  int64_t value;      /* 受 mutex 保护；演示 DBImpl 式的读-改-写 */
 };
 
 /* 深拷贝 C 字符串；对应上游用 std::string 复制入参、由对象接管所有权。 */
@@ -37,7 +38,6 @@ cldb_status_t cldb_example_create(const char *name, cldb_example_t **out) {
   cldb_example_t *example = NULL;
   char *name_copy = NULL;
   bool mutex_ready = false;
-  int rc;
 
   if (out == NULL) {
     return cldb_status_invalid_argument("cldb_example_create", "out is NULL");
@@ -52,9 +52,8 @@ cldb_status_t cldb_example_create(const char *name, cldb_example_t **out) {
     status = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
-  rc = pthread_mutex_init(&example->mutex, NULL);
-  if (rc != 0) {
-    status = cldb_status_io("pthread_mutex_init", strerror(rc));
+  status = cldb_mutex_init(&example->mutex);
+  if (!cldb_status_is_ok(status)) {
     goto cleanup;
   }
   mutex_ready = true;
@@ -74,7 +73,7 @@ cleanup:
   free(name_copy);
   if (example != NULL) {
     if (mutex_ready) {
-      pthread_mutex_destroy(&example->mutex);
+      (void)cldb_mutex_destroy(&example->mutex);
     }
     free(example->name);
     free(example);
@@ -86,7 +85,7 @@ void cldb_example_destroy(cldb_example_t *example) {
   if (example == NULL) {
     return;
   }
-  pthread_mutex_destroy(&example->mutex);
+  (void)cldb_mutex_destroy(&example->mutex);
   free(example->name);
   free(example);
 }
@@ -97,8 +96,9 @@ const char *cldb_example_name(cldb_example_t *example) {
 
 cldb_status_t cldb_example_set_name(cldb_example_t *example,
                                     const char *name) {
+  cldb_status_t status;
   char *copy;
-  int rc;
+  bool locked = false;
 
   if (example == NULL || name == NULL) {
     return cldb_status_invalid_argument("cldb_example_set_name",
@@ -108,30 +108,42 @@ cldb_status_t cldb_example_set_name(cldb_example_t *example,
   if (copy == NULL) {
     return cldb_status_io("out of memory", NULL);
   }
-  rc = pthread_mutex_lock(&example->mutex);
-  if (rc != 0) {
-    free(copy);
-    return cldb_status_io("pthread_mutex_lock", strerror(rc));
+  status = cldb_mutex_lock(&example->mutex);
+  if (!cldb_status_is_ok(status)) {
+    goto cleanup;
   }
+  locked = true;
   free(example->name);
   example->name = copy;
-  (void)pthread_mutex_unlock(&example->mutex);
-  return cldb_status_ok();
+  copy = NULL; /* 所有权转移给 example */
+
+cleanup:
+  /* 进入 cleanup 时若仍持锁则统一解锁；解锁失败覆盖成功状态。 */
+  if (locked) {
+    cldb_status_t unlock_status = cldb_mutex_unlock(&example->mutex);
+
+    if (cldb_status_is_ok(status)) {
+      status = unlock_status;
+    }
+  }
+  free(copy);
+  return status;
 }
 
 cldb_status_t cldb_example_add(cldb_example_t *example, int64_t delta,
                                int64_t *out) {
-  cldb_status_t status = cldb_status_ok();
+  cldb_status_t status;
   int64_t next = 0;
-  int rc;
+  bool locked = false;
 
   if (example == NULL) {
     return cldb_status_invalid_argument("cldb_example_add", "example is NULL");
   }
-  rc = pthread_mutex_lock(&example->mutex);
-  if (rc != 0) {
-    return cldb_status_io("pthread_mutex_lock", strerror(rc));
+  status = cldb_mutex_lock(&example->mutex);
+  if (!cldb_status_is_ok(status)) {
+    goto cleanup;
   }
+  locked = true;
   if (add_overflows(example->value, delta)) {
     status = cldb_status_invalid_argument("cldb_example_add",
                                           "integer overflow");
@@ -139,8 +151,15 @@ cldb_status_t cldb_example_add(cldb_example_t *example, int64_t delta,
     example->value += delta;
     next = example->value;
   }
-  (void)pthread_mutex_unlock(&example->mutex);
 
+cleanup:
+  if (locked) {
+    cldb_status_t unlock_status = cldb_mutex_unlock(&example->mutex);
+
+    if (cldb_status_is_ok(status)) {
+      status = unlock_status;
+    }
+  }
   if (cldb_status_is_ok(status) && out != NULL) {
     *out = next;
   }
@@ -148,17 +167,17 @@ cldb_status_t cldb_example_add(cldb_example_t *example, int64_t delta,
 }
 
 cldb_status_t cldb_example_get_value(cldb_example_t *example, int64_t *out) {
-  int rc;
+  cldb_status_t status;
 
   if (example == NULL || out == NULL) {
     return cldb_status_invalid_argument("cldb_example_get_value",
                                         "example or out is NULL");
   }
-  rc = pthread_mutex_lock(&example->mutex);
-  if (rc != 0) {
-    return cldb_status_io("pthread_mutex_lock", strerror(rc));
+  status = cldb_mutex_lock(&example->mutex);
+  if (!cldb_status_is_ok(status)) {
+    return status;
   }
   *out = example->value;
-  (void)pthread_mutex_unlock(&example->mutex);
-  return cldb_status_ok();
+  status = cldb_mutex_unlock(&example->mutex);
+  return status;
 }

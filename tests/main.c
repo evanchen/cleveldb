@@ -12,6 +12,8 @@ void cldb_register_arena_tests(void);
 void cldb_register_crc32c_tests(void);
 void cldb_register_port_tests(void);
 void cldb_register_atomic_tests(void);
+void cldb_register_mutex_tests(void);
+void cldb_register_thread_tests(void);
 
 /* 测试入口；新增套件时在此注册。 */
 int main(int argc, char **argv) {
@@ -27,5 +29,7 @@ int main(int argc, char **argv) {
   cldb_register_crc32c_tests();
   cldb_register_port_tests();
   cldb_register_atomic_tests();
+  cldb_register_mutex_tests();
+  cldb_register_thread_tests();
   return cldb_test_run(argc, argv);
 }
