@@ -10,7 +10,7 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T110 Iterator 基类、空/错误迭代器与 cleanup。数据库功能尚未实现。
+> 当前状态：T111 FilterPolicy 与 Bloom Filter。数据库功能尚未实现。
 
 ## 平台与依赖
 
