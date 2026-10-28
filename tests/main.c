@@ -14,6 +14,7 @@ void cldb_register_comparator_tests(void);
 void cldb_register_iterator_tests(void);
 void cldb_register_bloom_tests(void);
 void cldb_register_cache_tests(void);
+void cldb_register_env_tests(void);
 void cldb_register_port_tests(void);
 void cldb_register_atomic_tests(void);
 void cldb_register_mutex_tests(void);
@@ -35,6 +36,7 @@ int main(int argc, char **argv) {
   cldb_register_iterator_tests();
   cldb_register_bloom_tests();
   cldb_register_cache_tests();
+  cldb_register_env_tests();
   cldb_register_port_tests();
   cldb_register_atomic_tests();
   cldb_register_mutex_tests();

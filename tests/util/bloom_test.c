@@ -1,10 +1,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "cleveldb/buf.h"
 #include "cleveldb/filter_policy.h"
 #include "harness.h"
 #include "status_test_util.h"
-#include "util/buf.h"
 #include "util/coding.h"
 
 /* 把过滤器追加到 cldb_buf_t 的 sink 适配器；用内部 buf 验证公开 sink 契约。

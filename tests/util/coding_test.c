@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "cleveldb/buf.h"
 #include "harness.h"
-#include "util/buf.h"
 #include "util/coding.h"
 
 /* 校验缓冲内容；size 为 0 时允许 data 为 NULL。 */

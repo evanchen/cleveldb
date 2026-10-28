@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "cleveldb/buf.h"
 #include "harness.h"
-#include "util/buf.h"
 
 static void expect_content(const cldb_buf_t *buf, const void *data,
                            size_t size) {

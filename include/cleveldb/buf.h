@@ -1,5 +1,5 @@
-#ifndef CLDB_SRC_UTIL_BUF_H_
-#define CLDB_SRC_UTIL_BUF_H_
+#ifndef CLDB_INCLUDE_CLEVELDB_BUF_H_
+#define CLDB_INCLUDE_CLEVELDB_BUF_H_
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,8 +7,8 @@
 #include "cleveldb/slice.h"
 
 /* 可增长字节缓冲；替代上游把 std::string 当字节数组用的场景
- * （如 WriteBatch::rep_、BlockBuilder 的输出）。拥有 data，
- * 并保证 data[size] == '\0'，可直接当 C 字符串读取。 */
+ * （如 WriteBatch::rep_、BlockBuilder 的输出、Env 的文件内容与测试目录）。
+ * 拥有 data，并保证 data[size] == '\0'，可直接当 C 字符串读取。 */
 typedef struct cldb_buf {
   char *data;      /* owned；capacity 为 0 时可为 NULL；对应 std::string 存储 */
   size_t size;     /* 已用字节，不含 NUL；对应 std::string::size() */
@@ -57,4 +57,4 @@ cldb_slice_t cldb_buf_slice(const cldb_buf_t *buf);
  * 永不为 NULL；含 '\0' 的二进制内容只适合当 C 字符串处理。 */
 const char *cldb_buf_cstr(const cldb_buf_t *buf);
 
-#endif /* CLDB_SRC_UTIL_BUF_H_ */
+#endif /* CLDB_INCLUDE_CLEVELDB_BUF_H_ */

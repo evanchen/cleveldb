@@ -5,8 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "cleveldb/buf.h"
 #include "cleveldb/slice.h"
-#include "util/buf.h"
 
 /* 落盘数字编码；对应上游 util/coding.h：定长整数小端，varint 每字节
  * 低 7 位为数据、最高位为续位，字符串带 varint32 长度前缀。
