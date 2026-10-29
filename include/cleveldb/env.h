@@ -11,9 +11,9 @@
 #include "cleveldb/status.h"
 
 /* 平台接口；对应上游 leveldb::Env。把文件、线程、时间、日志等操作系统能力
- * 收敛到可替换的实现，便于测试注入故障。除 EnvWrapper 转发对象外，同一 Env
- * 可被多线程并发调用。具体实现把 cldb_env_t 放在结构体首成员，并在回调中
- * 转回外层类型。 */
+ * 收敛到可替换的实现，便于测试注入故障。同一 Env 的普通方法可被多线程
+ * 并发调用；destroy 是终止操作，不得与其它方法或尚未销毁的对象并发。
+ * 具体实现把 cldb_env_t 放在结构体首成员，并在回调中转回外层类型。 */
 typedef struct cldb_env cldb_env_t;
 
 /* 以下文件/日志对象均由 Env 的 New* 方法创建，成功后归调用者所有，必须用
@@ -26,13 +26,13 @@ typedef struct cldb_logger cldb_logger_t;
 /* 文件锁；对应上游 FileLock。由 LockFile 分配、UnlockFile 解锁并释放，调用
  * 者不得直接访问。state 供实现保存 fd/路径等私有数据。 */
 typedef struct cldb_file_lock {
-  void *state; /* owned by lock implementation；调用者不得读写 */
+  void *state; /* 由锁实现管理；调用者不得读写 */
 } cldb_file_lock_t;
 
 /* 字符串数组；对应上游 std::vector<std::string>，用于 GetChildren 的结果。
- * 每个元素是 owned 的 NUL 结尾字符串，调用者用 cldb_strvec_free 释放。 */
+ * 每个元素都是单独分配的 NUL 结尾字符串，由 cldb_strvec_free 释放。 */
 typedef struct cldb_strvec {
-  char **items;    /* owned；size 个元素，每个元素另行分配 */
+  char **items;    /* 由 cldb_strvec_free 释放；每个元素另行分配 */
   size_t size;     /* 元素个数 */
   size_t capacity; /* items 可容纳的元素数；clear 后保留 */
 } cldb_strvec_t;
@@ -53,12 +53,12 @@ bool cldb_strvec_push(cldb_strvec_t *vec, const char *value);
 /* 返回元素个数；vec 为 NULL 时返回 0。 */
 size_t cldb_strvec_size(const cldb_strvec_t *vec);
 
-/* 返回 borrowed 元素；越界或 vec 为 NULL 时返回 NULL。 */
+/* 返回内部元素指针，调用者不负责释放；越界或 vec 为 NULL 时返回 NULL。 */
 const char *cldb_strvec_get(const cldb_strvec_t *vec, size_t index);
 
 /* Env 方法表；对应上游 Env 的虚函数。除 new_appendable_file、
  * remove/delete_file、remove/delete_dir 和 destroy 可为 NULL 外，其余函数
- * 指针必须非 NULL。New* 成功时把调用者拥有的对象写入 *result 并返回 OK；
+ * 指针必须非 NULL。New* 成功时把新对象写入 *result，由调用者 destroy，并返回 OK；
  * 失败时写入 NULL 并返回非 OK。 */
 typedef struct cldb_env_vtbl {
   /* 打开只读顺序文件；对应上游 NewSequentialFile。返回的文件只允许单线程
@@ -112,8 +112,8 @@ typedef struct cldb_env_vtbl {
   cldb_status_t (*rename_file)(cldb_env_t *env, const char *src,
                                const char *target);
 
-  /* 获取文件锁；对应上游 LockFile。不等待已有锁；成功时把调用者拥有的锁
-   * 写入 *lock，失败时写入 NULL。 */
+  /* 获取文件锁；对应上游 LockFile。不等待已有锁；成功时把新锁写入 *lock，
+   * 由调用者解锁，失败时写入 NULL。 */
   cldb_status_t (*lock_file)(cldb_env_t *env, const char *fname,
                              cldb_file_lock_t **lock);
 
@@ -144,12 +144,13 @@ typedef struct cldb_env_vtbl {
   void (*sleep_for_microseconds)(cldb_env_t *env, int micros);
 
   /* 释放自定义 Env；对应上游虚析构。为 NULL 表示无需清理（如默认单例或
-   * 调用者拥有的栈对象）。 */
+   * 调用者提供的栈对象）。终止操作：调用者必须保证没有并发方法调用，
+   * 且由本 Env 创建的文件/日志/锁对象均已销毁。 */
   void (*destroy)(cldb_env_t *env);
 } cldb_env_vtbl_t;
 
 struct cldb_env {
-  const cldb_env_vtbl_t *vtbl; /* borrowed；非 NULL；通常 static const */
+  const cldb_env_vtbl_t *vtbl; /* 不负责释放；非 NULL；通常 static const */
 };
 
 /* 打开只读顺序文件；语义见 cldb_env_vtbl_t::new_sequential_file。 */
@@ -312,7 +313,7 @@ static inline void cldb_env_sleep_for_microseconds(cldb_env_t *env,
   env->vtbl->sleep_for_microseconds(env, micros);
 }
 
-/* 销毁自定义 Env；接受 NULL。destroy 为空时无操作。默认 Env 由库拥有，
+/* 销毁自定义 Env；接受 NULL。destroy 为空时无操作。默认 Env 由库管理，
  * 不得调用本函数。 */
 void cldb_env_destroy(cldb_env_t *env);
 
@@ -332,7 +333,7 @@ typedef struct cldb_sequential_file_vtbl {
 } cldb_sequential_file_vtbl_t;
 
 struct cldb_sequential_file {
-  const cldb_sequential_file_vtbl_t *vtbl; /* borrowed；非 NULL */
+  const cldb_sequential_file_vtbl_t *vtbl; /* 不负责释放；非 NULL */
 };
 
 /* 读取最多 n 字节；对应上游 SequentialFile::Read。 */
@@ -363,7 +364,7 @@ typedef struct cldb_random_access_file_vtbl {
 } cldb_random_access_file_vtbl_t;
 
 struct cldb_random_access_file {
-  const cldb_random_access_file_vtbl_t *vtbl; /* borrowed；非 NULL */
+  const cldb_random_access_file_vtbl_t *vtbl; /* 不负责释放；非 NULL */
 };
 
 /* 从 offset 读取最多 n 字节；对应上游 RandomAccessFile::Read。 */
@@ -398,7 +399,7 @@ typedef struct cldb_writable_file_vtbl {
 } cldb_writable_file_vtbl_t;
 
 struct cldb_writable_file {
-  const cldb_writable_file_vtbl_t *vtbl; /* borrowed；非 NULL */
+  const cldb_writable_file_vtbl_t *vtbl; /* 不负责释放；非 NULL */
 };
 
 /* 追加数据；对应上游 WritableFile::Append。 */
@@ -439,7 +440,7 @@ typedef struct cldb_logger_vtbl {
 } cldb_logger_vtbl_t;
 
 struct cldb_logger {
-  const cldb_logger_vtbl_t *vtbl; /* borrowed；非 NULL */
+  const cldb_logger_vtbl_t *vtbl; /* 不负责释放；非 NULL */
 };
 
 /* 写入一条日志；对应上游 Logger::Logv。 */
@@ -475,18 +476,18 @@ cldb_status_t cldb_write_string_to_file_sync(cldb_env_t *env,
 cldb_status_t cldb_read_file_to_string(cldb_env_t *env, const char *fname,
                                        cldb_buf_t *data);
 
-/* 返回默认 Env 单例；对应上游 Env::Default。对象由库拥有，不得销毁，
+/* 返回默认 Env 单例；对应上游 Env::Default。对象由库管理，不得销毁，
  * 由平台实现（Linux/POSIX）提供。 */
 cldb_env_t *cldb_env_default(void);
 
 /* 转发 Env；对应上游 EnvWrapper。用于只覆盖部分方法或注入故障。base 必须
- * 为首成员，wrapper 存储由调用者拥有，target 为 borrowed。 */
+ * 为首成员，wrapper 存储由调用者管理，target 仅被引用。 */
 typedef struct cldb_env_wrapper {
   cldb_env_t base;      /* 必须为首成员 */
-  cldb_env_t *target;   /* borrowed；不得为 NULL */
+  cldb_env_t *target;   /* 仅引用；不得为 NULL */
 } cldb_env_wrapper_t;
 
-/* 初始化 wrapper，把所有方法转发给 target；不取得 target 所有权。 */
+/* 初始化 wrapper，把所有方法转发给 target；不接管 target 的释放。 */
 void cldb_env_wrapper_init(cldb_env_wrapper_t *wrapper, cldb_env_t *target);
 
 /* 返回被转发的 target；wrapper 为 NULL 时返回 NULL。 */

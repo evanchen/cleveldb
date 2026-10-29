@@ -6,20 +6,20 @@
 | 相关文档 | `doc/coding-style.md`、`doc/plan.md` §6.5 |
 | 示例 | `src/util/example.{h,c}` |
 
-C 没有析构函数和所有权类型，所有权只能靠**约定 + 注释 + 审查**保证。本文件定义全项目的 owned/borrowed 规则；每个结构体在头文件中按第 4 节模板标注。
+C 没有析构函数和所有权类型，资源释放只能靠**约定 + 注释 + 审查**保证。本文件定义全项目的释放责任与引用期限规则；每个结构体在头文件中按第 4 节模板标注。
 
 ## 1. 术语
 
 | 术语 | 含义 | 谁释放 |
 |---|---|---|
-| owned | 持有者拥有内存/资源，负责释放一次 | 持有者 |
-| borrowed | 只借用，不转移所有权，不得释放 | 原持有者 |
-| transferred | 调用后所有权从调用者移到被调用者 | 接收者 |
+| 持有并负责释放 | 结构或对象保存指针，并负责释放一次 | 持有者 |
+| 仅引用 | 只保存指针，不负责释放 | 原持有者 |
+| 移交 | 调用后由被调用者负责释放 | 接收者 |
 | value type | 按值拷贝即可，无堆资源 | 无 |
 | internal refcount | 内部共享对象按引用计数存活 | 最后一个 unref 者 |
 | public handle | 用户通过 create/open 获得的不透明对象 | 用户通过对应 API |
 
-`const` 只表示只读，**不表示 borrowed**；`T *out` 也不自动表示 transferred。必须看函数注释。
+`const` 只表示只读，**不表示不负责释放**；`T *out` 也不自动表示移交。必须看函数注释。
 
 ## 2. 公开 API 规则
 
@@ -82,28 +82,28 @@ C 没有析构函数和所有权类型，所有权只能靠**约定 + 注释 + �
 
 - 内部 refcount 只解决“还有谁在用”的生存问题，不对外暴露；公开对象仍由明确的 create/destroy 管理。
 - 内部共享对象在跨线程传递前必须按任务规定持有引用；不能只借一个裸指针穿过锁边界。
-- 内部容器的元素所有权逐个注明：动态数组存指针时写清元素是否 owned，存 Slice 时写清借用来源。
+- 内部容器的元素逐个注明释放责任：动态数组存指针时写清元素由谁释放，存 Slice 时写清数据来源与有效范围。
 
 ## 4. 结构体字段注释模板
 
 ```c
 typedef struct cldb_example {
   pthread_mutex_t mutex; /* 保护 name/value */
-  char *name;            /* owned；受 mutex 保护 */
+  char *name;            /* 由本对象释放；受 mutex 保护 */
   int64_t value;         /* 受 mutex 保护 */
 } cldb_example_t;
 
 typedef struct cldb_foo {
-  char *path;              /* owned；destroy 释放 */
-  const cldb_env_t *env;   /* borrowed；调用者保证比本对象活得久 */
-  cldb_buf_t scratch;      /* owned；destroy 释放 data */
-  cldb_iterator_t *iter;   /* owned；destroy 前先销毁 iter */
+  char *path;              /* destroy 释放 */
+  const cldb_env_t *env;   /* 仅引用；调用者保证比本对象活得久 */
+  cldb_buf_t scratch;      /* destroy 释放 data */
+  cldb_iterator_t *iter;   /* destroy 前先销毁 iter */
 } cldb_foo_t;
 ```
 
 规则：
 
-- 每个指针字段都写 `owned`/`borrowed`/`transferred`，并指出保护它的锁（若有）。
+- 每个指针字段都写清由谁释放、只引用时的有效范围，并指出保护它的锁（若有）。
 - 指针 + 长度成对出现；不要只存指针让读者猜长度归属。
 - 数组字段写清元素所有权；`void *` 必须带类型说明或回调约定。
 - 结构体头注释写整体生命周期和锁要求，字段注释写局部细节。
@@ -124,7 +124,7 @@ cldb_status_t cldb_foo_create(const char *name, cldb_foo_t **out) {
     s = cldb_status_io("out of memory", NULL);
     goto cleanup;
   }
-  foo->name = copy_string(name); /* 返回 owned 副本，失败为 NULL */
+  foo->name = copy_string(name); /* 返回由调用者 free 的副本，失败为 NULL */
   if (foo->name == NULL) {
     s = cldb_status_io("out of memory", NULL);
     goto cleanup;
@@ -157,8 +157,8 @@ cleanup:
 ```text
 调用者 key(Slice, 借用)
   -> cldb_get
-     -> 内部查找，构造 value 副本（owned by library）
-  <- *value (owned by caller, 用 cldb_free 释放)
+     -> 内部查找，构造 value 副本（由库分配）
+  <- *value（由调用者用 cldb_free 释放）
 ```
 
 调用期间 key 必须有效；返回后 key 可释放。value 与 DB 生命周期无关，DB 关闭后仍可由调用者释放。
@@ -187,7 +187,7 @@ cleanup:
 
 | 错误 | 后果 | 正确做法 |
 |---|---|---|
-| 释放 borrowed Slice | 重复释放/堆破坏 | 只释放文档标注 owned 的返回值 |
+| 释放仅引用的 Slice | 重复释放/堆破坏 | 只释放文档标注由调用者释放的返回值 |
 | 返回局部数组指针 | 悬垂 | 分配并转移所有权，或让调用者提供缓冲 |
 | buffer 扩容后继续用旧 Slice | 悬垂/读到旧数据 | 重新取 slice |
 | 把用户 Slice 直接存入 MemTable/WAL | 调用返回后悬垂 | 复制到内部 buffer |
@@ -199,7 +199,7 @@ cleanup:
 
 ## 9. 审查清单
 
-- [ ] 每个函数注释写明输入/输出是 borrowed、owned 还是 transferred。
+- [ ] 每个函数注释写明输入/输出由谁释放、只引用时的有效范围。
 - [ ] 每个指针字段按模板标注所有权和保护锁。
 - [ ] 创建失败时输出参数为 NULL，部分构造可安全销毁。
 - [ ] 借用返回值写清有效窗口；调用者不得保存超过窗口的指针。

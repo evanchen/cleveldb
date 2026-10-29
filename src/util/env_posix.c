@@ -18,6 +18,7 @@
 #include "port/port.h"
 #include "port/port_mutex.h"
 #include "port/port_thread.h"
+#include "util/env_internal.h"
 
 /* Linux/POSIX 默认 Env；对应上游 util/env_posix.cc 与 posix_logger.h。
  * 随机读只保留 pread 路径，不移植 mmap；文件操作统一带 O_CLOEXEC。 */
@@ -36,21 +37,6 @@ static cldb_status_t posix_error(const char *context, int error_number) {
   return cldb_status_io(context, strerror(error_number));
 }
 
-static cldb_status_t out_of_memory(const char *context) {
-  return cldb_status_io(context, "out of memory");
-}
-
-/* 复制 NUL 结尾字符串；返回 owned，失败返回 NULL。 */
-static char *duplicate_string(const char *value) {
-  size_t length = strlen(value);
-  char *copy = malloc(length + 1);
-
-  if (copy != NULL) {
-    memcpy(copy, value, length + 1);
-  }
-  return copy;
-}
-
 /* 取路径的目录部分；对应上游 PosixWritableFile::Dirname。 */
 static char *path_dirname(const char *filename) {
   const char *slash = strrchr(filename, '/');
@@ -58,7 +44,7 @@ static char *path_dirname(const char *filename) {
   char *dirname;
 
   if (slash == NULL) {
-    return duplicate_string(".");
+    return cldb_env_strdup(".");
   }
   length = (size_t)(slash - filename);
   dirname = malloc(length + 1);
@@ -81,8 +67,8 @@ static bool is_manifest_file(const char *filename) {
 
 typedef struct posix_sequential_file {
   cldb_sequential_file_t base; /* 必须为首成员 */
-  int fd;                      /* owned；打开时获得，destroy 关闭 */
-  char *fname;                 /* owned；仅用于错误消息 */
+  int fd;                      /* 打开时获得；destroy 关闭 */
+  char *fname;                 /* 由本对象释放；仅用于错误消息 */
 } posix_sequential_file_t;
 
 /* 对应上游 PosixSequentialFile::Read；EINTR 自动重试。 */
@@ -136,8 +122,8 @@ static const cldb_sequential_file_vtbl_t kSequentialFileVtbl = {
 
 typedef struct posix_random_access_file {
   cldb_random_access_file_t base; /* 必须为首成员 */
-  int fd;                         /* owned；destroy 关闭 */
-  char *fname;                    /* owned；仅用于错误消息 */
+  int fd;                         /* 打开时获得；destroy 关闭 */
+  char *fname;                    /* 由本对象释放；仅用于错误消息 */
 } posix_random_access_file_t;
 
 /* 对应上游 PosixRandomAccessFile::Read；pread 不改变文件偏移，可并发。 */
@@ -175,10 +161,10 @@ typedef struct posix_writable_file {
   cldb_writable_file_t base; /* 必须为首成员 */
   char buffer[kWritableFileBufferSize]; /* 对应上游 buf_ */
   size_t pos;                           /* buffer 中待写字节数 */
-  int fd;                               /* owned；Close 后为 -1 */
+  int fd;                               /* 打开时获得；Close 后为 -1 */
   bool is_manifest;                     /* Sync 前需要先同步目录 */
-  char *fname;                          /* owned；仅用于错误消息 */
-  char *dirname;                        /* owned；MANIFEST 所在目录 */
+  char *fname;                          /* 由本对象释放；仅用于错误消息 */
+  char *dirname;                        /* 由本对象释放；MANIFEST 所在目录 */
 } posix_writable_file_t;
 
 /* 循环写直到写完；对应上游 WriteUnbuffered。 */
@@ -339,12 +325,12 @@ static cldb_status_t make_writable_file(const char *fname, int fd,
   if (file == NULL) {
     (void)close(fd);
     *result = NULL;
-    return out_of_memory("NewWritableFile");
+    return cldb_env_out_of_memory("NewWritableFile");
   }
   file->pos = 0;
   file->fd = fd;
   file->is_manifest = is_manifest_file(fname);
-  file->fname = duplicate_string(fname);
+  file->fname = cldb_env_strdup(fname);
   file->dirname = path_dirname(fname);
   if (file->fname == NULL || file->dirname == NULL) {
     free(file->fname);
@@ -352,7 +338,7 @@ static cldb_status_t make_writable_file(const char *fname, int fd,
     (void)close(fd);
     free(file);
     *result = NULL;
-    return out_of_memory("NewWritableFile");
+    return cldb_env_out_of_memory("NewWritableFile");
   }
   file->base.vtbl = &kWritableFileVtbl;
   *result = &file->base;
@@ -363,15 +349,15 @@ static cldb_status_t make_writable_file(const char *fname, int fd,
 
 typedef struct posix_file_lock {
   cldb_file_lock_t base; /* 必须为首成员 */
-  int fd;                /* owned；UnlockFile 关闭 */
-  char *fname;           /* owned；用于锁表与错误消息 */
+  int fd;                /* UnlockFile 关闭 */
+  char *fname;           /* 由本对象释放；用于锁表与错误消息 */
 } posix_file_lock_t;
 
 /* 进程内已锁文件表；对应上游 PosixLockTable，用于弥补 fcntl 不防同进程
  * 重复加锁的问题。 */
 typedef struct posix_lock_table {
   cldb_mutex_t mutex; /* 保护 names/size/capacity */
-  char **names;       /* owned；每项为复制后的路径 */
+  char **names;       /* 由本对象释放；每项为复制后的路径 */
   size_t size;        /* 已锁文件数 */
   size_t capacity;    /* names 可容纳的元素数 */
 } posix_lock_table_t;
@@ -422,7 +408,7 @@ static lock_insert_result_t lock_table_insert(posix_lock_table_t *table,
     table->names = new_names;
     table->capacity = new_capacity;
   }
-  copy = duplicate_string(fname);
+  copy = cldb_env_strdup(fname);
   if (copy == NULL) {
     (void)cldb_mutex_unlock(&table->mutex);
     return LOCK_INSERT_NO_MEMORY;
@@ -467,7 +453,7 @@ static int lock_or_unlock(int fd, bool lock) {
 
 typedef struct posix_logger {
   cldb_logger_t base; /* 必须为首成员 */
-  FILE *fp;           /* owned；destroy 关闭，flockfile 保护并发写 */
+  FILE *fp;           /* destroy 关闭；flockfile 保护并发写 */
 } posix_logger_t;
 
 /* 对应上游 PosixLogger::Logv；时间戳格式与上游一致。 */
@@ -558,9 +544,9 @@ static const cldb_logger_vtbl_t kLoggerVtbl = {
 /* ---------- 后台任务 ---------- */
 
 typedef struct background_work {
-  void (*fn)(void *); /* borrowed；任务回调 */
-  void *arg;          /* borrowed；回调参数，执行前必须保持有效 */
-  struct background_work *next; /* owned；FIFO 队列链接 */
+  void (*fn)(void *); /* 仅引用；任务回调 */
+  void *arg;          /* 仅引用；回调参数，执行前必须保持有效 */
+  struct background_work *next; /* 由本队列释放；FIFO 链接 */
 } background_work_t;
 
 /* 默认 Env；对应上游 PosixEnv。所有可变字段由内部锁保护。 */
@@ -569,8 +555,8 @@ typedef struct posix_env {
   cldb_mutex_t background_mutex; /* 保护下面的队列与 started 标志 */
   cldb_condvar_t background_cv;  /* 绑定 background_mutex */
   bool background_started;       /* 后台线程已创建 */
-  background_work_t *background_head; /* owned；最旧任务 */
-  background_work_t *background_tail; /* owned；最新任务 */
+  background_work_t *background_head; /* 由本对象释放；最旧任务 */
+  background_work_t *background_tail; /* 由本对象释放；最新任务 */
   posix_lock_table_t locks;           /* 进程内文件锁表 */
 } posix_env_t;
 
@@ -646,8 +632,8 @@ static void *background_thread_main(void *arg) {
 
 /* StartThread 的参数包；线程里取出回调与参数后立即释放。 */
 typedef struct start_thread_context {
-  void (*fn)(void *); /* borrowed */
-  void *arg;          /* borrowed */
+  void (*fn)(void *); /* 仅引用 */
+  void *arg;          /* 仅引用 */
 } start_thread_context_t;
 
 static void *start_thread_trampoline(void *arg) {
@@ -684,14 +670,14 @@ static cldb_status_t posix_new_sequential_file(
   file = malloc(sizeof(*file));
   if (file == NULL) {
     (void)close(fd);
-    return out_of_memory("NewSequentialFile");
+    return cldb_env_out_of_memory("NewSequentialFile");
   }
   file->fd = fd;
-  file->fname = duplicate_string(fname);
+  file->fname = cldb_env_strdup(fname);
   if (file->fname == NULL) {
     (void)close(fd);
     free(file);
-    return out_of_memory("NewSequentialFile");
+    return cldb_env_out_of_memory("NewSequentialFile");
   }
   file->base.vtbl = &kSequentialFileVtbl;
   *result = &file->base;
@@ -720,14 +706,14 @@ static cldb_status_t posix_new_random_access_file(
   file = malloc(sizeof(*file));
   if (file == NULL) {
     (void)close(fd);
-    return out_of_memory("NewRandomAccessFile");
+    return cldb_env_out_of_memory("NewRandomAccessFile");
   }
   file->fd = fd;
-  file->fname = duplicate_string(fname);
+  file->fname = cldb_env_strdup(fname);
   if (file->fname == NULL) {
     (void)close(fd);
     free(file);
-    return out_of_memory("NewRandomAccessFile");
+    return cldb_env_out_of_memory("NewRandomAccessFile");
   }
   file->base.vtbl = &kRandomAccessFileVtbl;
   *result = &file->base;
@@ -799,7 +785,7 @@ static cldb_status_t posix_get_children(cldb_env_t *env, const char *dirname,
   while ((entry = readdir(dir)) != NULL) {
     if (!cldb_strvec_push(result, entry->d_name)) {
       (void)closedir(dir);
-      return out_of_memory("GetChildren");
+      return cldb_env_out_of_memory("GetChildren");
     }
   }
   (void)closedir(dir);
@@ -892,7 +878,7 @@ static cldb_status_t posix_lock_file(cldb_env_t *env, const char *fname,
   }
   if (inserted == LOCK_INSERT_NO_MEMORY) {
     (void)close(fd);
-    return out_of_memory("LockFile");
+    return cldb_env_out_of_memory("LockFile");
   }
   if (lock_or_unlock(fd, true) == -1) {
     int saved_errno = errno;
@@ -906,16 +892,16 @@ static cldb_status_t posix_lock_file(cldb_env_t *env, const char *fname,
     (void)lock_or_unlock(fd, false);
     lock_table_remove(&self->locks, fname);
     (void)close(fd);
-    return out_of_memory("LockFile");
+    return cldb_env_out_of_memory("LockFile");
   }
   file_lock->fd = fd;
-  file_lock->fname = duplicate_string(fname);
+  file_lock->fname = cldb_env_strdup(fname);
   if (file_lock->fname == NULL) {
     (void)lock_or_unlock(fd, false);
     lock_table_remove(&self->locks, fname);
     (void)close(fd);
     free(file_lock);
-    return out_of_memory("LockFile");
+    return cldb_env_out_of_memory("LockFile");
   }
   file_lock->base.state = file_lock;
   *lock = &file_lock->base;
@@ -1014,13 +1000,13 @@ static cldb_status_t posix_get_test_directory(cldb_env_t *env,
   test_tmpdir = getenv("TEST_TMPDIR");
   if (test_tmpdir != NULL && test_tmpdir[0] != '\0') {
     if (!cldb_buf_assign(path, test_tmpdir, strlen(test_tmpdir))) {
-      return out_of_memory("GetTestDirectory");
+      return cldb_env_out_of_memory("GetTestDirectory");
     }
   } else {
     (void)snprintf(default_path, sizeof(default_path),
                    "/tmp/leveldbtest-%lu", (unsigned long)geteuid());
     if (!cldb_buf_assign(path, default_path, strlen(default_path))) {
-      return out_of_memory("GetTestDirectory");
+      return cldb_env_out_of_memory("GetTestDirectory");
     }
   }
   /* 目录可能已存在；对应上游忽略 CreateDir 的结果。 */
@@ -1056,7 +1042,7 @@ static cldb_status_t posix_new_logger(cldb_env_t *env, const char *fname,
   logger = malloc(sizeof(*logger));
   if (logger == NULL) {
     (void)fclose(fp);
-    return out_of_memory("NewLogger");
+    return cldb_env_out_of_memory("NewLogger");
   }
   logger->fp = fp;
   logger->base.vtbl = &kLoggerVtbl;

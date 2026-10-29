@@ -32,9 +32,9 @@ typedef struct cldb_lru_handle cldb_lru_handle_t;
  * link 必须为首成员，以便链表哨兵与条目互转。 */
 struct cldb_lru_handle {
   cldb_lru_link_t link; /* LRU/in-use 链表节点；对应上游 next/prev */
-  void *value; /* transferred；最终由 deleter 回收 */
+  void *value; /* 由 deleter 最终回收 */
   cldb_cache_deleter_fn_t deleter; /* 可为 NULL；持 shard 锁调用 */
-  void *deleter_arg; /* borrowed；与 deleter 一起保存 */
+  void *deleter_arg; /* 仅引用；与 deleter 一起保存 */
   cldb_lru_handle_t *next_hash; /* 同桶哈希链 */
   size_t charge; /* 计入 shard usage 的容量 */
   size_t key_size; /* key_data 的字节数 */
@@ -49,7 +49,7 @@ struct cldb_lru_handle {
 typedef struct cldb_handle_table {
   size_t length; /* 桶数量；2 的幂 */
   size_t elems; /* 条目数量 */
-  cldb_lru_handle_t **buckets; /* owned；length 个桶 */
+  cldb_lru_handle_t **buckets; /* 由本对象释放；length 个桶 */
 } cldb_handle_table_t;
 
 typedef struct cldb_lru_cache_shard {

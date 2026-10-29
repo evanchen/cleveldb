@@ -5,14 +5,14 @@
 #include <stddef.h>
 #include <string.h>
 
-/* 只读字节视图；对应上游 Slice。按值传递、不拥有 data，
+/* 只读字节视图；对应上游 Slice。按值传递、不负责释放 data，
  * 让 key/value 比较和传递不产生拷贝，生命周期由底层存储保证。 */
 typedef struct cldb_slice {
-  const char *data; /* borrowed；对应上游 data_；size > 0 时必须非 NULL */
+  const char *data; /* 仅引用；对应上游 data_；size > 0 时必须非 NULL */
   size_t size;      /* 字节数；对应上游 size_；不要求 NUL 结尾 */
 } cldb_slice_t;
 
-/* 构造借用视图；对应上游 Slice(d, n)。data 为 NULL 时返回空切片，
+/* 构造只读视图；对应上游 Slice(d, n)。data 为 NULL 时返回空切片，
  * 避免 C 调用方额外判空，也不改变二进制内容的语义。 */
 static inline cldb_slice_t cldb_slice_make(const char *data, size_t size) {
   cldb_slice_t slice;
@@ -32,7 +32,7 @@ static inline cldb_slice_t cldb_slice_empty(void) {
   return cldb_slice_make(NULL, 0);
 }
 
-/* 返回借用指针；对应上游 data()，调用者不得写入或释放。 */
+/* 返回内部指针；对应上游 data()，调用者不得写入或释放。 */
 static inline const char *cldb_slice_data(cldb_slice_t slice) {
   return slice.data;
 }

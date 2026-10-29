@@ -808,7 +808,7 @@ CLDB_TEST(env_wrapper_forwards_all) {
   CLDB_EXPECT_EQ_UINT(1, target.calls[MOCK_SLEEP]);
   CLDB_EXPECT_EQ_INT(42, target.sleep_micros);
 
-  /* wrapper 仅借用 target，销毁 wrapper 不销毁 target。 */
+  /* wrapper 仅引用 target，销毁 wrapper 不销毁 target。 */
   cldb_env_destroy(&wrapper.base);
   CLDB_EXPECT_EQ_UINT(0, target.calls[MOCK_DESTROY]);
   cldb_env_destroy(&target.base);

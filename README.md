@@ -10,7 +10,7 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T114 Linux 默认 Env（文件、目录、锁、Logger、后台线程与时间）。数据库功能尚未实现。
+> 当前状态：T115 MemEnv（内存文件系统、锁表、日志与时间/调度转发）。数据库功能尚未实现。
 
 ## 平台与依赖
 

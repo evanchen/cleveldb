@@ -8,9 +8,9 @@
 
 /* 可增长字节缓冲；替代上游把 std::string 当字节数组用的场景
  * （如 WriteBatch::rep_、BlockBuilder 的输出、Env 的文件内容与测试目录）。
- * 拥有 data，并保证 data[size] == '\0'，可直接当 C 字符串读取。 */
+ * 负责分配并释放 data，保证 data[size] == '\0'，可直接当 C 字符串读取。 */
 typedef struct cldb_buf {
-  char *data;      /* owned；capacity 为 0 时可为 NULL；对应 std::string 存储 */
+  char *data;      /* 由 cldb_buf_free 释放；capacity 为 0 时可为 NULL */
   size_t size;     /* 已用字节，不含 NUL；对应 std::string::size() */
   size_t capacity; /* 已分配字节，含 NUL；std::string 内部维护，C 版显式保存 */
 } cldb_buf_t;
@@ -45,11 +45,11 @@ bool cldb_buf_append_slice(cldb_buf_t *buf, cldb_slice_t slice);
 /* 替换全部内容；对应 std::string::assign()。source 可指向本缓冲。 */
 bool cldb_buf_assign(cldb_buf_t *buf, const void *data, size_t size);
 
-/* 交换两个缓冲；对应 std::string::swap()，O(1) 转移所有权。
+/* 交换两个缓冲；对应 std::string::swap()，O(1) 交换内部指针。
  * 任一为 NULL 时不做任何事。 */
 void cldb_buf_swap(cldb_buf_t *a, cldb_buf_t *b);
 
-/* 借用视图供 Slice 接口使用；对应从 std::string 构造 Slice。
+/* 返回只读视图供 Slice 接口使用；对应从 std::string 构造 Slice。
  * 视图在下次修改或释放前有效；空缓冲返回空 Slice。 */
 cldb_slice_t cldb_buf_slice(const cldb_buf_t *buf);
 

@@ -7,14 +7,14 @@
 #include "port/port_mutex.h"
 
 /* 私有布局；对应上游把实现细节留在 .cc 的惯例。
- * 字段所有权与锁保护范围在此集中说明，修改时同步更新。 */
+ * 字段释放责任与锁保护范围在此集中说明，修改时同步更新。 */
 struct cldb_example {
-  cldb_mutex_t mutex; /* owned；保护 name/value；对应上游 port::Mutex */
-  char *name;         /* owned；读写都在 mutex 内；对应上游受锁保护的成员 */
+  cldb_mutex_t mutex; /* 由本对象初始化/销毁；保护 name/value */
+  char *name;         /* 由本对象释放；读写都在 mutex 内 */
   int64_t value;      /* 受 mutex 保护；演示 DBImpl 式的读-改-写 */
 };
 
-/* 深拷贝 C 字符串；对应上游用 std::string 复制入参、由对象接管所有权。 */
+/* 深拷贝 C 字符串；对应上游用 std::string 复制入参、由对象接管并释放。 */
 static char *copy_string(const char *s) {
   size_t len = strlen(s);
   char *copy = malloc(len + 1);
@@ -115,7 +115,7 @@ cldb_status_t cldb_example_set_name(cldb_example_t *example,
   locked = true;
   free(example->name);
   example->name = copy;
-  copy = NULL; /* 所有权转移给 example */
+  copy = NULL; /* 此后由 example 负责释放 */
 
 cleanup:
   /* 进入 cleanup 时若仍持锁则统一解锁；解锁失败覆盖成功状态。 */

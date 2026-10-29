@@ -103,7 +103,7 @@ bool cldb_get_varint64(cldb_slice_t *input, uint64_t *value);
 bool cldb_put_length_prefixed_slice(cldb_buf_t *dst, cldb_slice_t value);
 
 /* 从 Slice 头部解析长度前缀内容并前进；对应上游
- * GetLengthPrefixedSlice。result 借用 input；内容不足返回 false，
+ * GetLengthPrefixedSlice。result 指向 input 内部，调用者不负责释放；内容不足返回 false，
  * 此时 input 已越过长度前缀，调用者应丢弃或自行回滚。 */
 bool cldb_get_length_prefixed_slice(cldb_slice_t *input,
                                     cldb_slice_t *result);

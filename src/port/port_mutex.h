@@ -15,15 +15,15 @@
  * 资源统一 goto cleanup，对应上游 MutexLock 析构时的自动解锁。 */
 
 typedef struct cldb_mutex {
-  pthread_mutex_t mutex; /* owned；pthread 默认属性，非递归 */
+  pthread_mutex_t mutex; /* 由本对象初始化/销毁；pthread 默认属性，非递归 */
   bool initialized;      /* init 成功且尚未 destroy；仅用于拒绝误用 */
 } cldb_mutex_t;
 
-/* 条件变量；对应上游 port::CondVar。mutex 为 borrowed，其生命周期
+/* 条件变量；对应上游 port::CondVar。mutex 仅被引用，其生命周期
  * 必须覆盖条件变量；Wait 要求调用者已持有该 mutex。 */
 typedef struct cldb_condvar {
-  pthread_cond_t cond; /* owned；pthread 条件变量 */
-  cldb_mutex_t *mutex; /* borrowed；绑定的互斥量 */
+  pthread_cond_t cond; /* 由本对象初始化/销毁；pthread 条件变量 */
+  cldb_mutex_t *mutex; /* 仅引用；绑定的互斥量 */
   bool initialized;    /* init 成功且尚未 destroy；仅用于拒绝误用 */
 } cldb_condvar_t;
 

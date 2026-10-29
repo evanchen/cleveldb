@@ -331,8 +331,8 @@ CLDB_TEST(env_posix_read_write) {
 
 /* 并发随机读的共享状态；每线程只写自己的 ok，join 后由主线程检查。 */
 typedef struct concurrent_read_state {
-  cldb_random_access_file_t *file; /* borrowed */
-  const char *data;                /* borrowed；期望内容 */
+  cldb_random_access_file_t *file; /* 仅引用 */
+  const char *data;                /* 仅引用；期望内容 */
   size_t data_size;                /* data 与文件长度 */
   int index;                       /* 线程序号，用于生成不同偏移 */
   bool ok;                         /* 所有随机读结果正确 */
@@ -742,7 +742,7 @@ typedef struct schedule_state {
 } schedule_state_t;
 
 typedef struct schedule_task {
-  schedule_state_t *state; /* borrowed */
+  schedule_state_t *state; /* 仅引用 */
   int index;               /* 提交序号 */
 } schedule_task_t;
 

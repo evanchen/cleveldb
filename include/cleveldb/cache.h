@@ -17,7 +17,7 @@ typedef struct cldb_cache cldb_cache_t;
 typedef struct cldb_cache_handle cldb_cache_handle_t;
 
 /* 条目被移出缓存且最后一个客户端 handle 释放时调用；对应上游 Insert 的
- * deleter。arg 是 Insert 传入的 borrowed 上下文，必须存活到 deleter 被
+ * deleter。arg 是 Insert 传入的上下文，cache 不负责释放，必须存活到 deleter 被
  * 调用（可能远晚于 Insert）；key 是缓存内部副本，仅本次调用有效；value 是
  * 交给缓存的指针。回调可能持有 shard 锁，禁止重入同一 cache 或等待使用该
  * cache 的线程。 */
@@ -29,7 +29,7 @@ typedef void (*cldb_cache_deleter_fn_t)(void *arg, cldb_slice_t key,
 typedef struct cldb_cache_vtbl {
   /* 插入或替换 key；对应上游 Insert。成功返回调用者持有的 handle，必须
    * 恰好 Release 一次。key 会被复制，返回后原 key 可释放。成功时 value
-   * 所有权转交缓存，条目最终删除时把 deleter_arg 原样传给 deleter；
+   * 释放责任转交缓存，条目最终删除时把 deleter_arg 原样传给 deleter；
    * deleter 可为 NULL，表示无需清理 value。失败返回 NULL，value 仍归调用
    * 者，且不会调用 deleter。charge 可大于容量；该条目在有外部引用时不会
    * 被驱逐。 */
@@ -46,7 +46,7 @@ typedef struct cldb_cache_vtbl {
    * 恰好调用一次；最后一个引用释放后可能立即触发 deleter。 */
   void (*release)(cldb_cache_t *cache, cldb_cache_handle_t *handle);
 
-  /* 读取 handle 中的 value；对应上游 Value。返回 borrowed 指针，至少在有
+  /* 读取 handle 中的 value；对应上游 Value。返回内部指针，调用者不负责释放，至少在有
    * 效到该 handle 被 Release 前；handle 必须尚未释放。 */
   void *(*value)(cldb_cache_t *cache, cldb_cache_handle_t *handle);
 
@@ -75,7 +75,7 @@ typedef struct cldb_cache_vtbl {
 } cldb_cache_vtbl_t;
 
 struct cldb_cache {
-  const cldb_cache_vtbl_t *vtbl; /* borrowed；非 NULL；通常 static const */
+  const cldb_cache_vtbl_t *vtbl; /* 不负责释放；非 NULL；通常 static const */
 };
 
 /* 插入或替换 key；语义见 cldb_cache_vtbl_t::insert。 */
@@ -137,8 +137,8 @@ void cldb_cache_destroy(cldb_cache_t *cache);
 
 /* 创建内置分片 LRU cache；对应上游 NewLRUCache。容量按 16 个 shard 均分并
  * 向上取整，实际总容量可能略大于 capacity。capacity 为 0 时仍可 Insert 和
- * 使用返回的 handle，但不会缓存，最后一个 Release 立即删除。成功返回调用者
- * 拥有的对象，分配失败返回 NULL。 */
+ * 使用返回的 handle，但不会缓存，最后一个 Release 立即删除。成功返回由调用者
+ * destroy 的对象，分配失败返回 NULL。 */
 cldb_cache_t *cldb_new_lru_cache(size_t capacity);
 
 #endif /* CLDB_INCLUDE_CLEVELDB_CACHE_H_ */

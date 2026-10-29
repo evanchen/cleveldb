@@ -17,7 +17,7 @@
 typedef void *(*cldb_thread_fn_t)(void *arg);
 
 typedef struct cldb_thread {
-  pthread_t handle; /* owned；start 成功后有效 */
+  pthread_t handle; /* start 成功后有效；由本对象 join/detach */
   bool started;     /* 已创建且尚未 join/detach；用于拒绝误用 */
 } cldb_thread_t;
 
@@ -25,14 +25,14 @@ typedef struct cldb_thread {
 void cldb_thread_init(cldb_thread_t *thread);
 
 /* 创建并启动线程；对应上游 StartThread 与 pthread_create。thread 必须
- * 已 init 且当前未启动；arg 为 borrowed，线程结束前必须保持有效。
+ * 已 init 且当前未启动；arg 仅被引用，线程结束前必须保持有效。
  * 失败返回非 OK，对象保持未启动。成功后线程为 joinable，直到 join
  * 或 detach。 */
 cldb_status_t cldb_thread_start(cldb_thread_t *thread, cldb_thread_fn_t fn,
                                 void *arg);
 
 /* 等待线程结束并消费其生命周期；对应 pthread_join。result 可以为 NULL，
- * 成功时写入线程返回值，其所有权由线程函数与调用者约定，库不释放。
+ * 成功时写入线程返回值；由线程函数与调用者约定谁释放，库不释放。
  * 已 join/detach 或未启动的对象返回 InvalidArgument。成功后对象可再次
  * start。 */
 cldb_status_t cldb_thread_join(cldb_thread_t *thread, void **result);

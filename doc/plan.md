@@ -724,7 +724,7 @@ MANIFEST 是这些记录的 WAL 流；第一条通常是全量快照。未知 ta
 4. **显式生命周期**：`_create/_init` 与 `_destroy/_free` 成对；没有析构函数、没有异常、没有隐式清理。
 5. **错误用返回值传播**：所有可能失败的函数返回 `cldb_status_t` 或 NULL + status 出参；禁止用全局 errno 作为唯一错误通道。
 6. **长度显式**：所有字节串用 `(const char*, size_t)`（Slice），不假设 NUL 结尾；路径单独保证 NUL 结尾。
-7. **所有权写进注释和命名**：谁分配、谁释放、借用多久；每个结构体头部注释列出 owned/borrowed 字段。
+7. **释放责任写进注释和命名**：谁分配、谁释放、引用有效多久；每个结构体头部注释列出由谁释放和仅引用的字段。
 8. **单线程写、多线程读**：与上游一致；不要引入额外的全局锁或“线程安全容器”掩盖锁设计。
 
 ### 6.2 Slice、Status、Buffer
@@ -962,7 +962,7 @@ typedef struct cldb_write_batch cldb_write_batch_t;
 typedef struct cldb_options {
   const cldb_comparator_t *comparator;      /* NULL => bytewise */
   cldb_env_t *env;                          /* NULL => default */
-  cldb_logger_t *info_log;                  /* borrowed; NULL => default LOG */
+  cldb_logger_t *info_log;                  /* 仅引用；NULL => default LOG */
   size_t write_buffer_size;                 /* default 4 MB */
   int max_open_files;                       /* default 1000 */
   cldb_cache_t *block_cache;                /* NULL => 8 MB LRU */
@@ -1202,7 +1202,7 @@ Golden 文件放在 `tests/golden/`，用只读方式打开；更新 golden 必�
 
 | 风险 | 概率 | 影响 | 应对 |
 |---|---|---|---|
-| C 内存/所有权错误导致难查崩溃 | 高 | 高 | 统一所有权规则；ASan；每任务审阅时核对 owned/borrowed；小步提交 |
+| C 内存/所有权错误导致难查崩溃 | 高 | 高 | 统一释放责任规则；ASan；每任务审阅时核对字段归属；小步提交 |
 | 锁/条件变量错误导致死锁或丢唤醒 | 中 | 高 | 单 mutex 设计；固定锁顺序；谓词循环；TSAN/压力测试 |
 | 磁盘格式细节偏差（CRC 范围、footer 填充、tag 编码） | 中 | 高 | 先写 golden + 与上游逐字节 diff；每格式单独任务 |
 | 恢复/崩溃顺序理解错误 | 中 | 高 | 按 I-7/I-8 做阶段注入测试；重读 impl.md + db_impl.cc |

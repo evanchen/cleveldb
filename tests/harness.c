@@ -9,7 +9,7 @@
 
 /* 注册表项；对应 gtest 内部登记的测试名与函数。 */
 typedef struct {
-  const char *name;  /* borrowed；来自 CLDB_RUN_TEST(#name) 的静态字符串 */
+  const char *name;  /* 仅引用；来自 CLDB_RUN_TEST(#name) 的静态字符串 */
   cldb_test_fn_t fn; /* 测试函数，由 CLDB_TEST 定义 */
 } cldb_test_case_t;
 

@@ -18,7 +18,7 @@ typedef enum cldb_status_code {
  * 可按值拷贝并独立使用，不需要 destroy；code 稳定，message 仅用于诊断。 */
 typedef struct cldb_status {
   cldb_status_code_t code; /* 对应上游 kOk..kIOError；可参与分支和测试 */
-  char message[256];       /* 对应 state_ 消息；owned，NUL 结尾，超长截断 */
+  char message[256];       /* 对应 state_ 消息；NUL 结尾，超长截断 */
 } cldb_status_t;
 
 /* 成功状态；对应上游 Status::OK()，message 为空。 */
@@ -44,7 +44,7 @@ static inline cldb_status_code_t cldb_status_code(cldb_status_t status) {
   return status.code;
 }
 
-/* 借用 message；对应上游 ToString() 的消息部分。必须传指针，
+/* 返回 message 内部指针，调用者不负责释放；对应上游 ToString() 的消息部分。必须传指针，
  * 因为按值返回会指向形参副本，调用后悬垂；status 为 NULL 时返回空串。 */
 static inline const char *cldb_status_message(const cldb_status_t *status) {
   return status != NULL ? status->message : "";

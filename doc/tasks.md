@@ -113,7 +113,7 @@ P8 兼容/加固/验收（T801-T806）
 - **目标**：把 plan.md §6 的设计约束落成可执行的检查和文档。
 - **设计/交付**：
   - `doc/coding-style.md`：命名、头文件保护、类型、整数溢出、错误传播、`goto cleanup`、锁注释、日志、禁用项（VLA、隐式转换、未对齐访问）。
-  - `doc/ownership.md`：每个基础类型的 owned/borrowed 规则；create/destroy 约定；公开 API 的 `cldb_free` 规则。
+  - `doc/ownership.md`：每个基础类型的释放责任与引用期限规则；create/destroy 约定；公开 API 的 `cldb_free` 规则。
   - `.clang-format`：Google 基风格、2 空格、80 列、指针右对齐。
   - 示例模块 `src/util/example.{h,c}`：create/destroy、错误返回、`goto cleanup`、锁注释、测试。status 尚未实现，先用本地 result 枚举，T102 再迁移。
 - **验收**：
@@ -766,7 +766,7 @@ P8 兼容/加固/验收（T801-T806）
 - **上游**：`table/block.h/.cc`、`table/block_test.cc`（若存在）
 - **目标**：解析 block、实现 Seek/Next/Prev 和损坏检测。
 - **设计/交付**：
-  - Block 结构：data Slice、restart 数组、num_restarts、owned/heap/cachable 标志。
+  - Block 结构：data Slice、restart 数组、num_restarts，以及数据归属、堆分配与可缓存标志。
   - 构造：读取末尾 4 字节 num_restarts，校验大小；计算 restart 起始位置。
   - Iter：`Seek` 先二分 restart（比较该 restart 的完整 key），再线性扫描；`SeekToFirst/Last`；`Next`；`Prev` 回到前一个 restart 重扫或从当前 restart 回退。
   - key 重建：保存当前 key buffer 和 restart offset；`shared` 必须 ≤ 上一个 key 长度。

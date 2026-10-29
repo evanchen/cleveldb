@@ -6,8 +6,8 @@
 /* 测试临时目录；在 Env 的测试目录下创建唯一子目录，析构时递归清理。
  * 上游测试各自拼接测试目录；这里集中封装，避免残留影响后续用例。 */
 typedef struct cldb_test_temp_dir {
-  cldb_env_t *env; /* borrowed；生命周期必须覆盖 destroy */
-  cldb_buf_t path; /* owned；创建成功后的目录路径 */
+  cldb_env_t *env; /* 仅引用；生命周期必须覆盖 destroy */
+  cldb_buf_t path; /* 由 cldb_test_temp_dir_destroy 释放；创建成功后的目录路径 */
 } cldb_test_temp_dir_t;
 
 /* 创建唯一子目录；prefix 仅用于诊断残留，可为 NULL。成功时 dir->path

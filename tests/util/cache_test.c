@@ -47,7 +47,7 @@ static void *value_for_int(int value) { return (void *)(uintptr_t)value; }
 static int int_for_value(void *value) { return (int)(uintptr_t)value; }
 
 typedef struct {
-  cldb_cache_t *cache; /* owned；由 fixture_destroy 释放 */
+  cldb_cache_t *cache; /* 由 fixture_destroy 释放 */
   delete_log_t deleted;
 } cache_fixture_t;
 
@@ -308,7 +308,7 @@ CLDB_TEST(cache_new_id) {
 enum { kIdThreads = 4, kIdsPerThread = 250 };
 
 typedef struct {
-  cldb_cache_t *cache; /* borrowed；并发只调用原子 NewId */
+  cldb_cache_t *cache; /* 仅引用；并发只调用原子 NewId */
   uint64_t ids[kIdsPerThread];
 } id_worker_t;
 
@@ -685,12 +685,12 @@ enum {
 };
 
 typedef struct {
-  cldb_cache_t *cache; /* borrowed */
+  cldb_cache_t *cache; /* 仅引用 */
   cldb_atomic_u64_t deleted; /* deleter 线程安全计数 */
 } stress_state_t;
 
 typedef struct {
-  stress_state_t *state; /* borrowed */
+  stress_state_t *state; /* 仅引用 */
   unsigned worker_id;
 } stress_worker_t;
 

@@ -9,15 +9,16 @@
  * 上游同样把 DBImpl 隐藏在 leveldb::DB 指针之后。 */
 typedef struct cldb_example cldb_example_t;
 
-/* 创建对象；成功时 *out 拥有对象（对应上游 DB::Open 返回、调用者负责
- * delete），失败返回非 OK 且 *out = NULL。 */
+/* 创建对象；成功时 *out 指向新对象并由调用者 destroy（对应上游 DB::Open
+ * 返回、调用者负责 delete），失败返回非 OK 且 *out = NULL。 */
 cldb_status_t cldb_example_create(const char *name, cldb_example_t **out);
 
 /* 销毁对象并释放其内部资源；对应上游 delete DB。
  * 接受 NULL；销毁后指针失效，不得重复销毁。 */
 void cldb_example_destroy(cldb_example_t *example);
 
-/* 借用内部 name，直到 set_name/destroy；对应上游只读属性访问。
+/* 返回内部 name 指针，调用者不负责释放，直到 set_name/destroy 前有效；
+ * 对应上游只读属性访问。
  * 不加锁，调用者不得与 set_name 并发。 */
 const char *cldb_example_name(cldb_example_t *example);
 

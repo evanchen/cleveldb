@@ -14,7 +14,7 @@
 typedef struct cldb_iterator cldb_iterator_t;
 typedef struct cldb_iter_cleanup cldb_iter_cleanup_t;
 
-/* cleanup 回调；对应上游 Iterator::CleanupFunction。arg1/arg2 为 borrowed，
+/* cleanup 回调；对应上游 Iterator::CleanupFunction。arg1/arg2 仅被引用，
  * 注册者必须保证它们存活到迭代器销毁；库不释放。 */
 typedef void (*cldb_iter_cleanup_fn_t)(void *arg1, void *arg2);
 
@@ -28,7 +28,7 @@ typedef struct cldb_iterator_vtbl {
   void (*seek_to_last)(cldb_iterator_t *iterator);
 
   /* 定位到第一个 >= target 的条目；对应上游 Seek。找到时 valid 为真。
-   * target 为 borrowed，只在调用期间有效。 */
+   * target 只在调用期间有效，不负责释放。 */
   void (*seek)(cldb_iterator_t *iterator, cldb_slice_t target);
 
   /* 移动到下一个/上一个条目；对应上游 Next/Prev。REQUIRES: 当前 valid。 */
@@ -36,7 +36,7 @@ typedef struct cldb_iterator_vtbl {
   void (*prev)(cldb_iterator_t *iterator);
 
   /* 返回当前 key/value；对应上游 key()/value()。REQUIRES: 当前 valid。
-   * 返回 Slice 为 borrowed，仅在下一次移动或销毁前有效。 */
+   * 返回的 Slice 指向内部数据，仅在下一次移动或销毁前有效。 */
   cldb_slice_t (*key)(const cldb_iterator_t *iterator);
   cldb_slice_t (*value)(const cldb_iterator_t *iterator);
 
@@ -51,8 +51,8 @@ typedef struct cldb_iterator_vtbl {
 } cldb_iterator_vtbl_t;
 
 struct cldb_iterator {
-  const cldb_iterator_vtbl_t *vtbl; /* borrowed；通常指向 static const 表 */
-  cldb_iter_cleanup_t *cleanup_head; /* internal；owned；由基类管理 */
+  const cldb_iterator_vtbl_t *vtbl; /* 不负责释放；通常指向 static const 表 */
+  cldb_iter_cleanup_t *cleanup_head; /* internal；由基类释放 */
   bool destroyed; /* internal；debug 重复销毁检查，调用者不得修改 */
 };
 
@@ -90,7 +90,7 @@ static inline void cldb_iter_seek_to_last(cldb_iterator_t *iterator) {
   iterator->vtbl->seek_to_last(iterator);
 }
 
-/* 定位到第一个 >= target 的条目；target 为借用。 */
+/* 定位到第一个 >= target 的条目；target 仅被引用。 */
 static inline void cldb_iter_seek(cldb_iterator_t *iterator,
                                   cldb_slice_t target) {
   iterator->vtbl->seek(iterator, target);
@@ -105,7 +105,7 @@ static inline void cldb_iter_prev(cldb_iterator_t *iterator) {
   iterator->vtbl->prev(iterator);
 }
 
-/* 借用当前 key/value；调用者必须保证当前 valid，且在下一次移动/销毁前
+/* 返回当前 key/value 的内部指针，调用者不负责释放；必须保证当前 valid，且在下一次移动/销毁前
  * 使用返回值。 */
 static inline cldb_slice_t cldb_iter_key(const cldb_iterator_t *iterator) {
   return iterator->vtbl->key(iterator);
@@ -121,7 +121,7 @@ static inline cldb_status_t cldb_iter_status(const cldb_iterator_t *iterator) {
 }
 
 /* 创建空迭代器（status 为 OK）或错误迭代器（保留 status 副本）；对应上游
- * NewEmptyIterator/NewErrorIterator。成功返回调用者拥有的堆对象，失败返回
+ * NewEmptyIterator/NewErrorIterator。成功返回由调用者 destroy 的堆对象，失败返回
  * NULL；两者都始终 valid 为假，seek 类方法为空操作。 */
 cldb_iterator_t *cldb_new_empty_iterator(void);
 cldb_iterator_t *cldb_new_error_iterator(cldb_status_t status);

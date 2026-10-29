@@ -11,7 +11,7 @@
 
 /* CRC32C（Castagnoli，反射多项式 0x82f63b78）用于 WAL/Table 块校验。
  * 与普通 CRC32 相比有硬件指令支持，且检错特性适合存储场景。
- * 输入 data 借用；n > 0 时必须非 NULL。 */
+ * 输入 data 只读；n > 0 时必须非 NULL。 */
 
 /* 计算把 data[0,n) 接在 init_crc 之后的结果；对应上游 crc32c::Extend。
  * init_crc 是此前数据的 CRC32C；n == 0 时原样返回 init_crc。 */
