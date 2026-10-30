@@ -10,7 +10,7 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T116 文件名/日志格式化与 Options 默认值。数据库功能尚未实现。
+> 当前状态：T202 WAL 日志写入器（分片、填充与 CRC）。数据库功能尚未实现。
 
 ## 平台与依赖
 
