@@ -1,79 +1,16 @@
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "db/log_format.h"
+#include "db/log_test_util.h"
 #include "db/log_writer.h"
 #include "harness.h"
 #include "status_test_util.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
 
-/* WAL 写入器；对应上游 db/log_test.cc 的写入用例。Reader 尚未实现，测试
- * 用本文件的最小解析器直接检查物理格式。 */
-
-/* 捕获追加内容的 writable file；可用于注入 Append/Flush 失败。 */
-typedef struct string_file {
-  cldb_writable_file_t base; /* 必须为首成员 */
-  cldb_buf_t data;
-  int append_calls;
-  int flush_calls;
-  int fail_append_call; /* 1 起始；0 表示不注入 */
-  int fail_flush_call;
-} string_file_t;
-
-static cldb_status_t string_file_append(cldb_writable_file_t *file,
-                                        cldb_slice_t data) {
-  string_file_t *self = (string_file_t *)file;
-
-  self->append_calls += 1;
-  if (self->fail_append_call > 0 &&
-      self->append_calls == self->fail_append_call) {
-    return cldb_status_io("string_file", "injected append error");
-  }
-  if (!cldb_buf_append_slice(&self->data, data)) {
-    return cldb_status_io("string_file", "out of memory");
-  }
-  return cldb_status_ok();
-}
-
-static cldb_status_t string_file_close(cldb_writable_file_t *file) {
-  (void)file;
-  return cldb_status_ok();
-}
-
-static cldb_status_t string_file_flush(cldb_writable_file_t *file) {
-  string_file_t *self = (string_file_t *)file;
-
-  self->flush_calls += 1;
-  if (self->fail_flush_call > 0 &&
-      self->flush_calls == self->fail_flush_call) {
-    return cldb_status_io("string_file", "injected flush error");
-  }
-  return cldb_status_ok();
-}
-
-static cldb_status_t string_file_sync(cldb_writable_file_t *file) {
-  (void)file;
-  return cldb_status_ok();
-}
-
-static void string_file_destroy(cldb_writable_file_t *file) { (void)file; }
-
-static const cldb_writable_file_vtbl_t kStringFileVtbl = {
-    string_file_append, string_file_close,  string_file_flush,
-    string_file_sync,   string_file_destroy,
-};
-
-static void string_file_init(string_file_t *file) {
-  memset(file, 0, sizeof(*file));
-  file->base.vtbl = &kStringFileVtbl;
-  cldb_buf_init(&file->data);
-}
-
-static void string_file_cleanup(string_file_t *file) {
-  cldb_buf_free(&file->data);
-}
+/* WAL 写入器；对应上游 db/log_test.cc 的写入用例。测试用本文件的最小解析器
+ * 直接检查物理格式。 */
 
 typedef struct parsed_record {
   cldb_log_record_type_t type;
@@ -143,32 +80,6 @@ static size_t parse_physical_records_at(const cldb_buf_t *data,
   return count;
 }
 
-/* 确定性的 payload 字节，便于检查分片拼接结果。 */
-static char pattern_byte(size_t index) {
-  return (char)(unsigned char)((index * 31u + 7u) % 251u);
-}
-
-static cldb_status_t add_pattern_record(cldb_log_writer_t *writer,
-                                        size_t length) {
-  char *data = NULL;
-  cldb_status_t status;
-
-  if (length > 0) {
-    size_t i;
-
-    data = malloc(length);
-    if (data == NULL) {
-      return cldb_status_io("test", "out of memory");
-    }
-    for (i = 0; i < length; ++i) {
-      data[i] = pattern_byte(i);
-    }
-  }
-  status = cldb_log_writer_add_record(writer, cldb_slice_make(data, length));
-  free(data);
-  return status;
-}
-
 /* 验证单条逻辑记录的分片类型、长度、CRC 与拼接后的 payload。 */
 static void expect_pattern_fragments(const cldb_buf_t *data,
                                      uint64_t base_offset,
@@ -189,7 +100,7 @@ static void expect_pattern_fragments(const cldb_buf_t *data,
     CLDB_EXPECT_EQ_INT(types[i], records[i].type);
     CLDB_EXPECT_EQ_UINT(fragments[i], records[i].length);
     for (j = 0; j < records[i].length; ++j) {
-      CLDB_EXPECT_EQ_INT((unsigned char)pattern_byte(joined),
+      CLDB_EXPECT_EQ_INT((unsigned char)cldb_test_pattern_byte(joined),
                          (unsigned char)records[i].payload[j]);
       ++joined;
     }
@@ -198,11 +109,11 @@ static void expect_pattern_fragments(const cldb_buf_t *data,
 }
 
 CLDB_TEST(log_writer_create_validation) {
-  string_file_t file;
+  cldb_test_string_file_t file;
   cldb_log_writer_t *writer = NULL;
   cldb_slice_t bad_slice = {NULL, 5};
 
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   CLDB_EXPECT_STATUS(CLDB_STATUS_INVALID_ARGUMENT,
                      cldb_log_writer_create(NULL, &writer));
   CLDB_EXPECT_EQ_PTR(NULL, writer);
@@ -224,7 +135,7 @@ CLDB_TEST(log_writer_create_validation) {
 
   cldb_log_writer_destroy(writer);
   cldb_log_writer_destroy(NULL);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 }
 
 /* 手写 FULL "hello" 的 golden；与日志格式测试的 12 字节 hexdump 一致。 */
@@ -234,10 +145,10 @@ CLDB_TEST(log_writer_hello_golden) {
       (char)0x00, (char)0x01, 'h',         'e',         'l',
       'l',         'o',
   };
-  string_file_t file;
+  cldb_test_string_file_t file;
   cldb_log_writer_t *writer = NULL;
 
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
   CLDB_ASSERT_OK(
       cldb_log_writer_add_record(writer, cldb_slice_make("hello", 5)));
@@ -252,7 +163,7 @@ CLDB_TEST(log_writer_hello_golden) {
   CLDB_EXPECT_EQ_INT(1, file.flush_calls);
 
   cldb_log_writer_destroy(writer);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 }
 
 CLDB_TEST(log_writer_fragmentation) {
@@ -283,18 +194,18 @@ CLDB_TEST(log_writer_fragmentation) {
   size_t c;
 
   for (c = 0; c < sizeof(kCases) / sizeof(kCases[0]); ++c) {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
-    CLDB_ASSERT_OK(add_pattern_record(writer, kCases[c].length));
+    CLDB_ASSERT_OK(cldb_test_log_writer_add_pattern(writer, kCases[c].length));
     CLDB_EXPECT_EQ_UINT(kCases[c].file_size, file.data.size);
     expect_pattern_fragments(&file.data, 0, kCases[c].length,
                              kCases[c].types, kCases[c].fragments,
                              kCases[c].count);
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 }
 
@@ -303,16 +214,16 @@ CLDB_TEST(log_writer_trailer_padding) {
   int leftover;
 
   for (leftover = 0; leftover <= 6; ++leftover) {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
     parsed_record_t records[2];
     size_t first_length =
         (size_t)(CLDB_LOG_BLOCK_SIZE - CLDB_LOG_HEADER_SIZE - leftover);
     size_t count;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
-    CLDB_ASSERT_OK(add_pattern_record(writer, first_length));
+    CLDB_ASSERT_OK(cldb_test_log_writer_add_pattern(writer, first_length));
     CLDB_ASSERT_OK(
         cldb_log_writer_add_record(writer, cldb_slice_make("x", 1)));
 
@@ -323,15 +234,15 @@ CLDB_TEST(log_writer_trailer_padding) {
     CLDB_ASSERT_EQ_UINT(2, count);
     CLDB_EXPECT_EQ_INT(CLDB_LOG_RECORD_TYPE_FULL, records[0].type);
     CLDB_EXPECT_EQ_UINT(first_length, records[0].length);
-    CLDB_EXPECT_EQ_INT(pattern_byte(0), records[0].payload[0]);
-    CLDB_EXPECT_EQ_INT(pattern_byte(first_length - 1),
+    CLDB_EXPECT_EQ_INT(cldb_test_pattern_byte(0), records[0].payload[0]);
+    CLDB_EXPECT_EQ_INT(cldb_test_pattern_byte(first_length - 1),
                        records[0].payload[first_length - 1]);
     CLDB_EXPECT_EQ_INT(CLDB_LOG_RECORD_TYPE_FULL, records[1].type);
     CLDB_EXPECT_EQ_UINT(1, records[1].length);
     CLDB_EXPECT_EQ_INT('x', records[1].payload[0]);
 
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 }
 
@@ -342,12 +253,12 @@ CLDB_TEST(log_writer_marginal_trailer) {
   size_t count;
 
   {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
-    CLDB_ASSERT_OK(add_pattern_record(writer, 32754));
+    CLDB_ASSERT_OK(cldb_test_log_writer_add_pattern(writer, 32754));
     CLDB_ASSERT_OK(cldb_log_writer_add_record(writer, cldb_slice_empty()));
     CLDB_ASSERT_OK(
         cldb_log_writer_add_record(writer, cldb_slice_make("bar", 3)));
@@ -366,16 +277,16 @@ CLDB_TEST(log_writer_marginal_trailer) {
     CLDB_EXPECT_EQ_INT(0, memcmp(records[2].payload, "bar", 3));
 
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 
   {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
-    CLDB_ASSERT_OK(add_pattern_record(writer, 32754));
+    CLDB_ASSERT_OK(cldb_test_log_writer_add_pattern(writer, 32754));
     CLDB_ASSERT_OK(
         cldb_log_writer_add_record(writer, cldb_slice_make("bar", 3)));
 
@@ -393,7 +304,7 @@ CLDB_TEST(log_writer_marginal_trailer) {
     CLDB_EXPECT_EQ_INT(0, memcmp(records[2].payload, "bar", 3));
 
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 }
 
@@ -403,15 +314,15 @@ CLDB_TEST(log_writer_dest_length_offset) {
   size_t i;
 
   for (i = 0; i < sizeof(kLengths) / sizeof(kLengths[0]); ++i) {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create_with_length(&file.base,
                                                       kLengths[i], &writer));
     CLDB_EXPECT_EQ_INT(kOffsets[i], writer->block_offset);
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 }
 
@@ -426,10 +337,10 @@ CLDB_TEST(log_writer_dest_length_resume) {
 
   /* 从虚拟偏移 100 继续写。 */
   {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(
         cldb_log_writer_create_with_length(&file.base, 100, &writer));
     CLDB_ASSERT_OK(
@@ -447,15 +358,15 @@ CLDB_TEST(log_writer_dest_length_resume) {
     CLDB_EXPECT_EQ_UINT(5, records[0].length);
 
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 
   /* 块尾剩 3 字节：先补零，再在新块写 FULL。 */
   {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create_with_length(
         &file.base, (uint64_t)CLDB_LOG_BLOCK_SIZE - 3, &writer));
     CLDB_ASSERT_OK(
@@ -471,15 +382,15 @@ CLDB_TEST(log_writer_dest_length_resume) {
     CLDB_EXPECT_EQ_INT('x', records[0].payload[0]);
 
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 
   /* 块尾剩 7 字节：非空记录先写零长度 FIRST，再在新块写 LAST。 */
   {
-    string_file_t file;
+    cldb_test_string_file_t file;
     cldb_log_writer_t *writer = NULL;
 
-    string_file_init(&file);
+    cldb_test_string_file_init(&file);
     CLDB_ASSERT_OK(cldb_log_writer_create_with_length(
         &file.base, (uint64_t)CLDB_LOG_BLOCK_SIZE - 7, &writer));
     CLDB_ASSERT_OK(
@@ -497,16 +408,16 @@ CLDB_TEST(log_writer_dest_length_resume) {
     CLDB_EXPECT_EQ_INT(0, memcmp(records[1].payload, "bar", 3));
 
     cldb_log_writer_destroy(writer);
-    string_file_cleanup(&file);
+    cldb_test_string_file_free(&file);
   }
 }
 
 CLDB_TEST(log_writer_error_propagation) {
-  string_file_t file;
+  cldb_test_string_file_t file;
   cldb_log_writer_t *writer = NULL;
 
   /* header 追加失败。 */
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   file.fail_append_call = 1;
   CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
   CLDB_EXPECT_STATUS(
@@ -516,10 +427,10 @@ CLDB_TEST(log_writer_error_propagation) {
   CLDB_EXPECT_EQ_INT(0, file.flush_calls);
   CLDB_EXPECT_EQ_UINT(0, file.data.size);
   cldb_log_writer_destroy(writer);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 
   /* payload 追加失败。 */
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   file.fail_append_call = 2;
   CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
   CLDB_EXPECT_STATUS(
@@ -529,10 +440,10 @@ CLDB_TEST(log_writer_error_propagation) {
   CLDB_EXPECT_EQ_INT(0, file.flush_calls);
   CLDB_EXPECT_EQ_UINT(CLDB_LOG_HEADER_SIZE, file.data.size);
   cldb_log_writer_destroy(writer);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 
   /* Flush 失败。 */
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   file.fail_flush_call = 1;
   CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
   CLDB_EXPECT_STATUS(
@@ -542,10 +453,10 @@ CLDB_TEST(log_writer_error_propagation) {
   CLDB_EXPECT_EQ_INT(1, file.flush_calls);
   CLDB_EXPECT_EQ_UINT(12, file.data.size);
   cldb_log_writer_destroy(writer);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 
   /* 块尾零填充失败。 */
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   file.fail_append_call = 1;
   CLDB_ASSERT_OK(cldb_log_writer_create_with_length(
       &file.base, (uint64_t)CLDB_LOG_BLOCK_SIZE - 3, &writer));
@@ -556,19 +467,19 @@ CLDB_TEST(log_writer_error_propagation) {
   CLDB_EXPECT_EQ_INT(0, file.flush_calls);
   CLDB_EXPECT_EQ_UINT(0, file.data.size);
   cldb_log_writer_destroy(writer);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 
   /* 第二片 header 失败后停止，不再写后续分片。 */
-  string_file_init(&file);
+  cldb_test_string_file_init(&file);
   file.fail_append_call = 3;
   CLDB_ASSERT_OK(cldb_log_writer_create(&file.base, &writer));
   CLDB_EXPECT_STATUS(CLDB_STATUS_IO_ERROR,
-                     add_pattern_record(writer, 100000));
+                     cldb_test_log_writer_add_pattern(writer, 100000));
   CLDB_EXPECT_EQ_INT(3, file.append_calls);
   CLDB_EXPECT_EQ_INT(1, file.flush_calls);
   CLDB_EXPECT_EQ_UINT(CLDB_LOG_BLOCK_SIZE, file.data.size);
   cldb_log_writer_destroy(writer);
-  string_file_cleanup(&file);
+  cldb_test_string_file_free(&file);
 }
 
 void cldb_register_log_writer_tests(void) {
