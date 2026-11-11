@@ -10,7 +10,7 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T203 WAL 日志读取器（重组、初始偏移与损坏上报）。数据库功能尚未实现。
+> 当前状态：T204 WAL 兼容与故障注入阶段门（golden、差分、截断/翻位/类型破坏、fuzz）。数据库功能尚未实现。
 
 ## 平台与依赖
 
@@ -51,6 +51,17 @@ ASan/UBSan：
 make asan
 ```
 
+与上游 WAL 交叉验证（路径由命令行提供，不写入仓库）。上游 WAL 与 `OUT`
+依次写入 `"hello"`、空记录、`"foo"`、32768 个 `'x'`、`"bar"`：
+
+```sh
+# 读取上游 log::Writer 生成的 WAL
+make compat-wal WAL=/path/to/upstream.log
+
+# 另写出本实现的 WAL，供上游 log::Reader 读取
+make compat-wal WAL=/path/to/upstream.log OUT=/path/to/cleveldb.log
+```
+
 常用目标：
 
 | 目标 | 说明 |
@@ -61,6 +72,7 @@ make asan
 | `tools` | 构建 `tools/*.c` |
 | `test` | 运行完整测试套件 |
 | `check` | 运行全套回归（过滤/列表/重复/失败路径） |
+| `compat-wal` | 交叉验证上游 WAL（`WAL=路径`，`OUT=路径` 可选） |
 | `strict-check` | 对全部源码做严格告警语法检查（Debug/NDEBUG） |
 | `asan` | 在 `build-asan` 下用 ASan/UBSan 跑 `check` |
 | `install` | 安装库和公开头文件 |

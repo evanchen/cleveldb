@@ -48,7 +48,7 @@ TEST_OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRCS))
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/%,$(TOOL_SRCS))
 DEPFILES := $(LIB_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
-.PHONY: all lib tests tools test check strict-check asan clean clean-all install help
+.PHONY: all lib tests tools test check compat-wal strict-check asan clean clean-all install help
 .DEFAULT_GOAL := all
 
 all: $(LIB) $(TEST_BIN)
@@ -78,6 +78,16 @@ $(BUILD_DIR)/%: tools/%.c $(LIB)
 
 test: $(TEST_BIN)
 	$(TEST_BIN)
+
+# 读取上游 WAL；给出 OUT 时另写一份本实现的 WAL 供上游读取。
+# 上游产物路径由命令行提供，不写入仓库。
+compat-wal: $(TEST_BIN)
+	@if [ -z "$(WAL)" ] && [ -z "$(OUT)" ]; then \
+	  echo "用法: make compat-wal WAL=/路径/上游.log [OUT=/路径/cleveldb.log]"; \
+	  exit 1; \
+	fi
+	@CLDB_LOG_COMPAT_WAL="$(WAL)" CLDB_LOG_COMPAT_OUT="$(OUT)" \
+	  $(TEST_BIN) --filter=log_compat_external
 
 check: $(TEST_BIN)
 	@set -e; \
@@ -151,6 +161,7 @@ help:
 	  "  tools     构建 tools/*.c" \
 	  "  test      运行完整测试套件" \
 	  "  check     运行全套回归（过滤/列表/重复/失败路径）" \
+	  "  compat-wal 交叉读取上游 WAL（WAL=路径，OUT=路径可选）" \
 	  "  strict-check 严格告警语法检查（Debug/NDEBUG）" \
 	  "  asan      在 build-asan 下用 ASan/UBSan 跑 check" \
 	  "  clean     删除当前 BUILD_DIR" \
@@ -162,6 +173,7 @@ help:
 	  "  BUILD_DIR=目录        默认 build" \
 	  "  CC=编译器             默认 cc" \
 	  "  WERROR=1              把警告当作错误" \
-	  "  PREFIX=路径           默认 /usr/local"
+	  "  PREFIX=路径           默认 /usr/local" \
+	  "  WAL/OUT=路径          compat-wal 的输入/输出"
 
 -include $(DEPFILES)

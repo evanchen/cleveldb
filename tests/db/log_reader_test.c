@@ -9,107 +9,23 @@
 #include "db/log_writer.h"
 #include "harness.h"
 #include "status_test_util.h"
-#include "util/coding.h"
-#include "util/crc32c.h"
 #include "util/random.h"
 
 /* WAL 读取器；对应上游 db/log_test.cc 的读取与损坏用例。 */
 
-typedef struct string_source {
-  cldb_sequential_file_t base; /* 必须为首成员 */
-  cldb_slice_t contents;       /* 尚未读取的字节 */
-  bool force_error;            /* 下次 Read 返回错误 */
-  bool returned_partial;       /* 已读过不足一块的数据 */
-} string_source_t;
-
-static cldb_status_t source_read(cldb_sequential_file_t *file, size_t n,
-                                 cldb_slice_t *result, char *scratch) {
-  string_source_t *self = (string_source_t *)file;
-  size_t count = n;
-
-  CLDB_ASSERT_FALSE(self->returned_partial);
-  if (self->force_error) {
-    self->force_error = false;
-    self->returned_partial = true;
-    *result = cldb_slice_empty();
-    return cldb_status_corruption("read error", NULL);
-  }
-  if (self->contents.size < count) {
-    count = self->contents.size;
-    self->returned_partial = true;
-  }
-  if (count > 0) {
-    memcpy(scratch, self->contents.data, count);
-  }
-  *result = cldb_slice_make(scratch, count);
-  cldb_slice_remove_prefix(&self->contents, count);
-  return cldb_status_ok();
-}
-
-static cldb_status_t source_skip(cldb_sequential_file_t *file, uint64_t n) {
-  string_source_t *self = (string_source_t *)file;
-  size_t count = (size_t)n;
-
-  if (n > (uint64_t)self->contents.size) {
-    self->contents = cldb_slice_empty();
-    return cldb_status_not_found("string_source", "skipped past end");
-  }
-  cldb_slice_remove_prefix(&self->contents, count);
-  return cldb_status_ok();
-}
-
-static void source_destroy(cldb_sequential_file_t *file) { (void)file; }
-
-static const cldb_sequential_file_vtbl_t kSourceVtbl = {
-    source_read, source_skip, source_destroy,
-};
-
-typedef struct report_collector {
-  uint64_t dropped_bytes;
-  char message[4096];
-  size_t message_size;
-} report_collector_t;
-
-static void report_collector_add(void *arg, uint64_t bytes,
-                                 cldb_status_t status) {
-  report_collector_t *collector = (report_collector_t *)arg;
-  char text[512];
-  size_t length = cldb_status_to_string(status, text, sizeof(text));
-
-  collector->dropped_bytes += bytes;
-  if (length > sizeof(text) - 1) {
-    length = sizeof(text) - 1;
-  }
-  if (length <= sizeof(collector->message) - 1 - collector->message_size) {
-    memcpy(collector->message + collector->message_size, text, length);
-    collector->message_size += length;
-    collector->message[collector->message_size] = '\0';
-  }
-}
-
-static void report_collector_reset(report_collector_t *collector) {
-  memset(collector, 0, sizeof(*collector));
-}
-
-static bool match_error(const report_collector_t *collector,
-                        const char *text) {
-  return strstr(collector->message, text) != NULL;
-}
-
 typedef struct log_fixture {
   cldb_test_string_file_t dest;
   cldb_log_writer_t *writer;
-  string_source_t source;
-  report_collector_t report;
+  cldb_test_string_source_t source;
+  cldb_test_report_t report;
   cldb_log_reader_t *reader;
 } log_fixture_t;
 
 static void fixture_init(log_fixture_t *f) {
   memset(f, 0, sizeof(*f));
   cldb_test_string_file_init(&f->dest);
-  f->source.base.vtbl = &kSourceVtbl;
-  f->source.contents = cldb_slice_empty();
-  report_collector_reset(&f->report);
+  cldb_test_string_source_init(&f->source);
+  cldb_test_report_reset(&f->report);
 }
 
 static void fixture_cleanup(log_fixture_t *f) {
@@ -155,12 +71,11 @@ static void fixture_start_reading(log_fixture_t *f, bool checksum,
   f->writer = NULL;
   cldb_log_reader_destroy(f->reader);
   f->reader = NULL;
-  report_collector_reset(&f->report);
-  f->source.contents = cldb_buf_slice(&f->dest.data);
-  f->source.force_error = false;
-  f->source.returned_partial = false;
+  cldb_test_report_reset(&f->report);
+  cldb_test_string_source_reset(&f->source,
+                                cldb_buf_slice(&f->dest.data));
   CLDB_ASSERT_OK(cldb_log_reader_create(
-      &f->source.base, report_collector_add, &f->report, checksum,
+      &f->source.base, cldb_test_report_callback, &f->report, checksum,
       initial_offset, &f->reader));
 }
 
@@ -218,37 +133,6 @@ static void fixture_expect_eof(log_fixture_t *f) {
   ok = cldb_log_reader_read_record(f->reader, &record, &scratch);
   CLDB_EXPECT_FALSE(ok);
   cldb_buf_free(&scratch);
-}
-
-static void increment_byte(cldb_buf_t *data, size_t offset,
-                           unsigned int delta) {
-  uint8_t value = (uint8_t)data->data[offset];
-
-  data->data[offset] = (char)(uint8_t)(value + delta);
-}
-
-static void set_byte(cldb_buf_t *data, size_t offset, uint8_t value) {
-  data->data[offset] = (char)value;
-}
-
-/* 按读取器的算法重算 CRC：覆盖 type 字节 + payload。 */
-static void fix_checksum(cldb_buf_t *data, size_t header_offset,
-                         size_t length) {
-  uint32_t crc = cldb_crc32c_mask(cldb_crc32c_value(
-      data->data + header_offset + CLDB_LOG_TYPE_OFFSET, length + 1));
-
-  cldb_encode_fixed32(data->data + header_offset + CLDB_LOG_CRC_OFFSET, crc);
-}
-
-static void shrink(cldb_buf_t *data, size_t count) {
-  CLDB_ASSERT_TRUE(count <= data->size);
-  CLDB_ASSERT_TRUE(cldb_buf_resize(data, data->size - count));
-}
-
-static void wipe(cldb_buf_t *data, size_t begin, size_t end, char value) {
-  CLDB_ASSERT_TRUE(begin <= end);
-  CLDB_ASSERT_TRUE(end <= data->size);
-  memset(data->data + begin, (unsigned char)value, end - begin);
 }
 
 static void make_skewed_string(uint32_t index, cldb_random_t *rnd,
@@ -493,7 +377,7 @@ CLDB_TEST(log_reader_read_error) {
   f.source.force_error = true;
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(CLDB_LOG_BLOCK_SIZE, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "read error"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "read error"));
   fixture_cleanup(&f);
 }
 
@@ -502,7 +386,7 @@ CLDB_TEST(log_reader_checksum_disabled) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  increment_byte(&f.dest.data, 0, 10);
+  cldb_test_increment_byte(&f.dest.data, 0, 10);
   fixture_start_reading(&f, false, 0);
 
   fixture_expect_record(&f, "foo", 3);
@@ -516,13 +400,13 @@ CLDB_TEST(log_reader_bad_record_type) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  increment_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, 100);
-  fix_checksum(&f.dest.data, 0, 3);
+  cldb_test_increment_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, 100);
+  cldb_test_fix_crc(&f.dest.data, 0, 3);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(3, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "unknown record type"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "unknown record type"));
   fixture_cleanup(&f);
 }
 
@@ -531,8 +415,9 @@ CLDB_TEST(log_reader_zero_record_ignored) {
 
   fixture_init(&f);
   fixture_write(&f, "", 0);
-  set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, CLDB_LOG_RECORD_TYPE_ZERO);
-  fix_checksum(&f.dest.data, 0, 0);
+  cldb_test_set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET,
+                     CLDB_LOG_RECORD_TYPE_ZERO);
+  cldb_test_fix_crc(&f.dest.data, 0, 0);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
@@ -546,7 +431,7 @@ CLDB_TEST(log_reader_truncated_trailing_ignored) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  shrink(&f.dest.data, 4);
+  cldb_test_shrink(&f.dest.data, 4);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
@@ -563,13 +448,13 @@ CLDB_TEST(log_reader_bad_length) {
   fixture_init(&f);
   fixture_write_pattern(&f, first_length);
   fixture_write(&f, "foo", 3);
-  increment_byte(&f.dest.data, CLDB_LOG_LENGTH_OFFSET, 1);
+  cldb_test_increment_byte(&f.dest.data, CLDB_LOG_LENGTH_OFFSET, 1);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_record(&f, "foo", 3);
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(CLDB_LOG_BLOCK_SIZE, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "bad record length"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "bad record length"));
   fixture_cleanup(&f);
 }
 
@@ -578,7 +463,7 @@ CLDB_TEST(log_reader_bad_length_at_end_ignored) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  shrink(&f.dest.data, 1);
+  cldb_test_shrink(&f.dest.data, 1);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
@@ -592,12 +477,12 @@ CLDB_TEST(log_reader_checksum_mismatch) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  increment_byte(&f.dest.data, 0, 10);
+  cldb_test_increment_byte(&f.dest.data, 0, 10);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(10, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "checksum mismatch"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "checksum mismatch"));
   fixture_cleanup(&f);
 }
 
@@ -606,13 +491,14 @@ CLDB_TEST(log_reader_unexpected_middle_type) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, CLDB_LOG_RECORD_TYPE_MIDDLE);
-  fix_checksum(&f.dest.data, 0, 3);
+  cldb_test_set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET,
+                     CLDB_LOG_RECORD_TYPE_MIDDLE);
+  cldb_test_fix_crc(&f.dest.data, 0, 3);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(3, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "missing start"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "missing start"));
   fixture_cleanup(&f);
 }
 
@@ -621,13 +507,14 @@ CLDB_TEST(log_reader_unexpected_last_type) {
 
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
-  set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, CLDB_LOG_RECORD_TYPE_LAST);
-  fix_checksum(&f.dest.data, 0, 3);
+  cldb_test_set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET,
+                     CLDB_LOG_RECORD_TYPE_LAST);
+  cldb_test_fix_crc(&f.dest.data, 0, 3);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(3, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "missing start"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "missing start"));
   fixture_cleanup(&f);
 }
 
@@ -637,14 +524,16 @@ CLDB_TEST(log_reader_unexpected_full_type) {
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
   fixture_write(&f, "bar", 3);
-  set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, CLDB_LOG_RECORD_TYPE_FIRST);
-  fix_checksum(&f.dest.data, 0, 3);
+  cldb_test_set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET,
+                     CLDB_LOG_RECORD_TYPE_FIRST);
+  cldb_test_fix_crc(&f.dest.data, 0, 3);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_record(&f, "bar", 3);
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(3, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "partial record without end"));
+  CLDB_EXPECT_TRUE(
+      cldb_test_report_matches(&f.report, "partial record without end"));
   fixture_cleanup(&f);
 }
 
@@ -654,14 +543,16 @@ CLDB_TEST(log_reader_unexpected_first_type) {
   fixture_init(&f);
   fixture_write(&f, "foo", 3);
   fixture_write_pattern(&f, 100000);
-  set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET, CLDB_LOG_RECORD_TYPE_FIRST);
-  fix_checksum(&f.dest.data, 0, 3);
+  cldb_test_set_byte(&f.dest.data, CLDB_LOG_TYPE_OFFSET,
+                     CLDB_LOG_RECORD_TYPE_FIRST);
+  cldb_test_fix_crc(&f.dest.data, 0, 3);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_pattern(&f, 100000);
   fixture_expect_eof(&f);
   CLDB_EXPECT_EQ_UINT(3, f.report.dropped_bytes);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "partial record without end"));
+  CLDB_EXPECT_TRUE(
+      cldb_test_report_matches(&f.report, "partial record without end"));
   fixture_cleanup(&f);
 }
 
@@ -670,7 +561,7 @@ CLDB_TEST(log_reader_missing_last_ignored) {
 
   fixture_init(&f);
   fixture_write_pattern(&f, CLDB_LOG_BLOCK_SIZE);
-  shrink(&f.dest.data, 14);
+  cldb_test_shrink(&f.dest.data, 14);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
@@ -684,7 +575,7 @@ CLDB_TEST(log_reader_partial_last_ignored) {
 
   fixture_init(&f);
   fixture_write_pattern(&f, CLDB_LOG_BLOCK_SIZE);
-  shrink(&f.dest.data, 1);
+  cldb_test_shrink(&f.dest.data, 1);
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_eof(&f);
@@ -715,8 +606,8 @@ CLDB_TEST(log_reader_error_joins_records) {
   fixture_write_pattern(&f, CLDB_LOG_BLOCK_SIZE);
   fixture_write_pattern(&f, CLDB_LOG_BLOCK_SIZE);
   fixture_write(&f, "correct", 7);
-  wipe(&f.dest.data, CLDB_LOG_BLOCK_SIZE, 2 * (size_t)CLDB_LOG_BLOCK_SIZE,
-       'x');
+  cldb_test_wipe(&f.dest.data, CLDB_LOG_BLOCK_SIZE,
+                 2 * (size_t)CLDB_LOG_BLOCK_SIZE, 'x');
   fixture_start_reading(&f, true, 0);
 
   fixture_expect_record(&f, "correct", 7);
@@ -725,7 +616,7 @@ CLDB_TEST(log_reader_error_joins_records) {
                    2 * (uint64_t)CLDB_LOG_BLOCK_SIZE);
   CLDB_EXPECT_TRUE(f.report.dropped_bytes <=
                    2 * (uint64_t)CLDB_LOG_BLOCK_SIZE + 100);
-  CLDB_EXPECT_TRUE(match_error(&f.report, "checksum mismatch"));
+  CLDB_EXPECT_TRUE(cldb_test_report_matches(&f.report, "checksum mismatch"));
   fixture_cleanup(&f);
 }
 
@@ -739,7 +630,7 @@ CLDB_TEST(log_reader_block_tail_garbage_ignored) {
   fixture_write_pattern(&f, first_length);
   fixture_write(&f, "bar", 3);
   for (i = 0; i < 6; ++i) {
-    set_byte(&f.dest.data,
+    cldb_test_set_byte(&f.dest.data,
              (size_t)CLDB_LOG_BLOCK_SIZE - 6 + i, (uint8_t)0x5a);
   }
   fixture_start_reading(&f, true, 0);
