@@ -38,6 +38,9 @@ endif
 ifeq ($(SANITIZE),1)
 CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer -g
 LDFLAGS += -fsanitize=address,undefined
+else ifeq ($(SANITIZE),thread)
+CFLAGS += -fsanitize=thread -fno-omit-frame-pointer -g
+LDFLAGS += -fsanitize=thread
 endif
 
 LIB_SRCS := $(shell find src -name '*.c' | sort)
@@ -48,7 +51,7 @@ TEST_OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRCS))
 TOOL_BINS := $(patsubst tools/%.c,$(BUILD_DIR)/%,$(TOOL_SRCS))
 DEPFILES := $(LIB_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
-.PHONY: all lib tests tools test check compat-wal strict-check asan clean clean-all install help
+.PHONY: all lib tests tools test check compat-wal strict-check asan tsan clean clean-all install help
 .DEFAULT_GOAL := all
 
 all: $(LIB) $(TEST_BIN)
@@ -132,6 +135,10 @@ asan:
 	$(MAKE) BUILD_DIR=build-asan clean
 	$(MAKE) BUILD=debug BUILD_DIR=build-asan SANITIZE=1 check
 
+tsan:
+	$(MAKE) BUILD_DIR=build-tsan clean
+	$(MAKE) BUILD=debug BUILD_DIR=build-tsan SANITIZE=thread check
+
 clean:
 	@case "$(BUILD_DIR)" in \
 	  "" | "/" | "." | "$(CURDIR)") \
@@ -141,7 +148,7 @@ clean:
 	rm -rf -- $(BUILD_DIR)
 
 clean-all:
-	rm -rf -- build build-asan build-release build-clang
+	rm -rf -- build build-asan build-tsan build-release build-clang
 
 install: $(LIB)
 	install -d "$(DESTDIR)$(PREFIX)/lib" \
@@ -164,8 +171,9 @@ help:
 	  "  compat-wal 交叉读取上游 WAL（WAL=路径，OUT=路径可选）" \
 	  "  strict-check 严格告警语法检查（Debug/NDEBUG）" \
 	  "  asan      在 build-asan 下用 ASan/UBSan 跑 check" \
+	  "  tsan      在 build-tsan 下用 TSan 跑 check" \
 	  "  clean     删除当前 BUILD_DIR" \
-	  "  clean-all 删除 build/build-asan/build-release/build-clang" \
+	  "  clean-all 删除 build/build-asan/build-tsan/build-release/build-clang" \
 	  "  install   安装库和公开头文件" \
 	  "" \
 	  "变量:" \
@@ -173,6 +181,7 @@ help:
 	  "  BUILD_DIR=目录        默认 build" \
 	  "  CC=编译器             默认 cc" \
 	  "  WERROR=1              把警告当作错误" \
+	  "  SANITIZE=1|thread     启用 ASan/UBSan 或 TSan" \
 	  "  PREFIX=路径           默认 /usr/local" \
 	  "  WAL/OUT=路径          compat-wal 的输入/输出"
 

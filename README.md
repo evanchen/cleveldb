@@ -10,7 +10,7 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T305 SnapshotList。数据库功能尚未实现。
+> 当前状态：T306 内存引擎集成与随机测试。数据库功能尚未实现。
 
 ## 平台与依赖
 
@@ -45,10 +45,11 @@ make CC=clang BUILD_DIR=build-clang -j"$(nproc)"
 make CC=clang BUILD_DIR=build-clang test
 ```
 
-ASan/UBSan：
+ASan/UBSan 与 TSan：
 
 ```sh
 make asan
+make tsan
 ```
 
 与上游 WAL 交叉验证（路径由命令行提供，不写入仓库）。上游 WAL 与 `OUT`
@@ -75,9 +76,10 @@ make compat-wal WAL=/path/to/upstream.log OUT=/path/to/cleveldb.log
 | `compat-wal` | 交叉验证上游 WAL（`WAL=路径`，`OUT=路径` 可选） |
 | `strict-check` | 对全部源码做严格告警语法检查（Debug/NDEBUG） |
 | `asan` | 在 `build-asan` 下用 ASan/UBSan 跑 `check` |
+| `tsan` | 在 `build-tsan` 下用 TSan 跑 `check` |
 | `install` | 安装库和公开头文件 |
 | `clean` | 删除当前 `BUILD_DIR` |
-| `clean-all` | 删除 `build`、`build-asan`、`build-release`、`build-clang` |
+| `clean-all` | 删除 `build`、`build-asan`、`build-tsan`、`build-release`、`build-clang` |
 
 常用变量：
 
@@ -87,7 +89,7 @@ make compat-wal WAL=/path/to/upstream.log OUT=/path/to/cleveldb.log
 | `BUILD_DIR` | `build` | 构建目录 |
 | `CC` | `cc` | C 编译器 |
 | `WERROR` | `0` | `1` 时把编译警告当作错误 |
-| `SANITIZE` | `0` | `1` 时启用 ASan/UBSan |
+| `SANITIZE` | `0` | `1` 启用 ASan/UBSan，`thread` 启用 TSan |
 | `PREFIX` | `/usr/local` | `install` 安装前缀 |
 | `DESTDIR` | 空 | `install` 暂存目录 |
 
@@ -115,6 +117,6 @@ Makefile            构建入口（GNU Make）
 
 1. 只实现一个任务，保持改动独立可审阅。
 2. 在 Debian 上按上面的命令构建，运行本任务相关测试。
-3. 运行 `make asan`，用 ASan/UBSan 再跑一遍测试。
+3. 运行 `make asan`；涉及线程/并发的任务再运行 `make tsan`。
 4. 审阅本任务的 `git diff`/新增代码，对照上游实现理解所有权、锁和错误路径。
 5. 回答任务里的“吃透检查点”，再进入下一个任务。
