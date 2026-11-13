@@ -24,6 +24,7 @@ void cldb_register_log_compat_tests(void);
 void cldb_register_dbformat_tests(void);
 void cldb_register_write_batch_tests(void);
 void cldb_register_skiplist_tests(void);
+void cldb_register_memtable_tests(void);
 void cldb_register_logging_tests(void);
 void cldb_register_options_tests(void);
 void cldb_register_memenv_tests(void);
@@ -58,6 +59,7 @@ int main(int argc, char **argv) {
   cldb_register_dbformat_tests();
   cldb_register_write_batch_tests();
   cldb_register_skiplist_tests();
+  cldb_register_memtable_tests();
   cldb_register_logging_tests();
   cldb_register_options_tests();
   cldb_register_memenv_tests();

@@ -59,7 +59,7 @@ struct cldb_write_batch_handler {
 };
 
 /* 按记录顺序同步回调 handler；对应上游 Iterate。每条记录交给 handler，
- * sequence 由 handler 自己维护（MemTableInserter 由 MemTable 模块提供）。batch
+ * sequence 由 handler 自己维护，batch 内每条成功记录消费一个序列号。batch
  * 头不足 12 字节、记录截断、tag 未知、实际记录数与 count 不符时返回
  * Corruption；参数无效返回 InvalidArgument。 */
 cldb_status_t cldb_write_batch_iterate(

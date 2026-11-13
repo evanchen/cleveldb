@@ -42,4 +42,12 @@ cldb_slice_t cldb_write_batch_contents(const cldb_write_batch_t *batch);
 bool cldb_write_batch_set_contents(cldb_write_batch_t *batch,
                                    cldb_slice_t contents);
 
+struct cldb_memtable;
+
+/* 用 batch 的 sequence 起逐条写入 memtable，每条成功后 sequence 加一；
+ * 对应上游 WriteBatchInternal::InsertInto。返回首个 Add/解析错误，失败前
+ * 可能已写入部分记录，调用者须按未完成批次处理；batch 不被修改。 */
+cldb_status_t cldb_write_batch_insert_into(const cldb_write_batch_t *batch,
+                                           struct cldb_memtable *memtable);
+
 #endif /* CLDB_SRC_DB_WRITE_BATCH_INTERNAL_H_ */

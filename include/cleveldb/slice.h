@@ -32,6 +32,12 @@ static inline cldb_slice_t cldb_slice_empty(void) {
   return cldb_slice_make(NULL, 0);
 }
 
+/* 检查 data/size 组合是否满足 Slice 约定：size > 0 时 data 必须非 NULL。
+ * 外部传入的 Slice 在比较或解引用前应先通过此检查。 */
+static inline bool cldb_slice_is_valid(cldb_slice_t slice) {
+  return slice.data != NULL || slice.size == 0;
+}
+
 /* 返回内部指针；对应上游 data()，调用者不得写入或释放。 */
 static inline const char *cldb_slice_data(cldb_slice_t slice) {
   return slice.data;
