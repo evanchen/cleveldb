@@ -10,7 +10,7 @@ LevelDB 的 C11 学习性移植，**仅支持 Linux**。
 - 所有权规则：[doc/ownership.md](doc/ownership.md)
 - 上游基线：`E:\github\leveldb`，`1.23-93-gbb74ef7`（commit `bb74ef7`）
 
-> 当前状态：T306 内存引擎集成与随机测试。数据库功能尚未实现。
+> 当前状态：T401 BlockBuilder 数据块构建。数据库功能尚未实现。
 
 ## 平台与依赖
 
