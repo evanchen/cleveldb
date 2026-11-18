@@ -9,13 +9,7 @@
 #include "cleveldb/iterator.h"
 #include "cleveldb/slice.h"
 #include "cleveldb/status.h"
-
-/* 块数据来源与所有权提示；对应上游 format.h 的 BlockContents。 */
-typedef struct cldb_block_contents {
-  cldb_slice_t data;    /* 块字节；heap_allocated 为真时由 Block 接管并 free */
-  bool cachable;        /* 数据可放入 block cache，由使用者决定是否缓存 */
-  bool heap_allocated;  /* data 来自堆分配，Destroy 时释放 */
-} cldb_block_contents_t;
+#include "table/format.h"
 
 /* 只读数据块/索引块；对应上游 table/block.h 的 Block。构造时解析尾部
  * restart 数组位置并做基本大小校验；块内条目在迭代时惰性解码。 */
