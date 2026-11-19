@@ -38,6 +38,21 @@ static inline bool cldb_slice_is_valid(cldb_slice_t slice) {
   return slice.data != NULL || slice.size == 0;
 }
 
+/* 校验并原地规范化 Slice：NULL + 0 归一为静态空串，避免空指针参与指针
+ * 运算。返回 false 表示 slice 为 NULL 或 data/size 组合非法。 */
+static inline bool cldb_slice_normalize(cldb_slice_t *slice) {
+  if (slice == NULL) {
+    return false;
+  }
+  if (slice->data == NULL) {
+    if (slice->size != 0) {
+      return false;
+    }
+    slice->data = "";
+  }
+  return true;
+}
+
 /* 返回内部指针；对应上游 data()，调用者不得写入或释放。 */
 static inline const char *cldb_slice_data(cldb_slice_t slice) {
   return slice.data;

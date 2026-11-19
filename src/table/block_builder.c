@@ -8,20 +8,6 @@
 
 enum { CLDB_BLOCK_BUILDER_INITIAL_RESTARTS = 4 };
 
-/* NULL + 0 也是合法 Slice；规范成静态空串，避免空指针参与指针运算。 */
-static bool normalize_slice(cldb_slice_t *slice) {
-  if (slice == NULL) {
-    return false;
-  }
-  if (slice->data == NULL) {
-    if (slice->size != 0) {
-      return false;
-    }
-    slice->data = "";
-  }
-  return true;
-}
-
 /* 保证还能追加一个 restart 偏移；失败时数组和计数都不变。 */
 static bool ensure_restart_capacity(cldb_block_builder_t *builder) {
   size_t max_count = SIZE_MAX / sizeof(uint32_t);
@@ -152,7 +138,7 @@ cldb_status_t cldb_block_builder_add(cldb_block_builder_t *builder,
     return cldb_status_invalid_argument("BlockBuilder::Add",
                                         "Finish has already been called");
   }
-  if (!normalize_slice(&key) || !normalize_slice(&value)) {
+  if (!cldb_slice_normalize(&key) || !cldb_slice_normalize(&value)) {
     return cldb_status_invalid_argument("BlockBuilder::Add",
                                         "invalid key or value slice");
   }

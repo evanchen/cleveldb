@@ -30,6 +30,7 @@ void cldb_register_memory_engine_tests(void);
 void cldb_register_block_builder_tests(void);
 void cldb_register_block_tests(void);
 void cldb_register_format_tests(void);
+void cldb_register_filter_block_tests(void);
 void cldb_register_logging_tests(void);
 void cldb_register_options_tests(void);
 void cldb_register_memenv_tests(void);
@@ -70,6 +71,7 @@ int main(int argc, char **argv) {
   cldb_register_block_builder_tests();
   cldb_register_block_tests();
   cldb_register_format_tests();
+  cldb_register_filter_block_tests();
   cldb_register_logging_tests();
   cldb_register_options_tests();
   cldb_register_memenv_tests();
